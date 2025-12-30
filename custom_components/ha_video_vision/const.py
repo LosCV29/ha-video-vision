@@ -74,6 +74,10 @@ DEFAULT_FACIAL_REC_CONFIDENCE: Final = 50
 CONF_SELECTED_CAMERAS: Final = "selected_cameras"
 DEFAULT_SELECTED_CAMERAS: Final = []
 
+# Voice aliases for easy voice commands
+CONF_CAMERA_ALIASES: Final = "camera_aliases"
+DEFAULT_CAMERA_ALIASES: Final = {}
+
 # LEGACY: Manual RTSP config (kept for backward compatibility)
 CONF_RTSP_HOST: Final = "rtsp_host"
 CONF_RTSP_PORT: Final = "rtsp_port"

@@ -35,6 +35,7 @@
         "menu_options": {
           "provider": "AI Provider Settings",
           "cameras": "Select Cameras",
+          "voice_aliases": "Voice Aliases",
           "facial_rec": "Facial Recognition",
           "video": "Video Settings",
           "notifications": "Notifications"
@@ -54,6 +55,13 @@
         "description": "Found {camera_count} cameras in Home Assistant",
         "data": {
           "selected_cameras": "Enable these cameras for AI analysis"
+        }
+      },
+      "voice_aliases": {
+        "title": "Voice Aliases",
+        "description": "Map simple voice names to cameras. One per line: alias:camera.entity_id\n\nExample:\nbackyard:camera.backyard_fluent\nfront porch:camera.front_porch\ndriveway:camera.driveway_cam\n\nYour cameras:\n{available_cameras}",
+        "data": {
+          "alias_config": "Voice Aliases (one per line)"
         }
       },
       "facial_rec": {

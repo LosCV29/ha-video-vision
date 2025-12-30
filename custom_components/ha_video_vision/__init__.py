@@ -49,6 +49,8 @@ from .const import (
     # Cameras - NEW Auto-Discovery
     CONF_SELECTED_CAMERAS,
     DEFAULT_SELECTED_CAMERAS,
+    CONF_CAMERA_ALIASES,
+    DEFAULT_CAMERA_ALIASES,
     # Video
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
@@ -271,6 +273,9 @@ class VideoAnalyzer:
         # Auto-discovered cameras (list of entity_ids)
         self.selected_cameras = config.get(CONF_SELECTED_CAMERAS, DEFAULT_SELECTED_CAMERAS)
         
+        # Voice aliases for easy voice commands
+        self.camera_aliases = config.get(CONF_CAMERA_ALIASES, DEFAULT_CAMERA_ALIASES)
+        
         # Video settings
         self.video_duration = config.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION)
         self.video_width = config.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH)
@@ -301,49 +306,106 @@ class VideoAnalyzer:
             self.provider, len(self.selected_cameras)
         )
 
+    def _normalize_name(self, name: str) -> str:
+        """Normalize a name for comparison (lowercase, remove special chars)."""
+        import re
+        # Lowercase, replace underscores/hyphens with spaces, remove extra spaces
+        normalized = name.lower().strip()
+        normalized = re.sub(r'[_\-]+', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized
+
     def _find_camera_entity(self, camera_input: str) -> str | None:
-        """Find camera entity ID by name, entity_id, or friendly name."""
+        """Find camera entity ID by alias, name, entity_id, or friendly name."""
+        camera_input_norm = self._normalize_name(camera_input)
         camera_input_lower = camera_input.lower().strip()
         
-        # Direct match with entity_id
-        if camera_input_lower.startswith("camera."):
-            if camera_input_lower in [c.lower() for c in self.selected_cameras]:
-                return camera_input
-            # Check if it exists even if not in selected
-            state = self.hass.states.get(camera_input)
-            if state:
-                return camera_input
+        # PRIORITY 0: Check voice aliases FIRST
+        for alias, entity_id in self.camera_aliases.items():
+            alias_norm = self._normalize_name(alias)
+            # Exact alias match
+            if alias_norm == camera_input_norm:
+                return entity_id
+            # Alias contained in input (e.g., "backyard" in "check the backyard camera")
+            if alias_norm in camera_input_norm:
+                return entity_id
+            # Input contained in alias
+            if camera_input_norm in alias_norm:
+                return entity_id
         
-        # Search through selected cameras
+        # Build a list of all cameras with their searchable names
+        camera_matches = []
+        
+        # First check selected cameras
         for entity_id in self.selected_cameras:
             state = self.hass.states.get(entity_id)
             if not state:
                 continue
             
-            # Match by entity_id (without camera. prefix)
-            if entity_id.lower() == f"camera.{camera_input_lower}":
-                return entity_id
+            friendly_name = state.attributes.get("friendly_name", "")
+            entity_suffix = entity_id.replace("camera.", "")
             
-            # Match by entity_id suffix
-            if entity_id.lower().endswith(camera_input_lower):
-                return entity_id
-            
-            # Match by friendly name
-            friendly_name = state.attributes.get("friendly_name", "").lower()
-            if friendly_name == camera_input_lower:
-                return entity_id
-            
-            # Partial match on friendly name
-            if camera_input_lower in friendly_name or friendly_name in camera_input_lower:
-                return entity_id
+            camera_matches.append({
+                "entity_id": entity_id,
+                "friendly_name": friendly_name,
+                "friendly_norm": self._normalize_name(friendly_name),
+                "entity_suffix": entity_suffix,
+                "entity_norm": self._normalize_name(entity_suffix),
+            })
         
-        # Search ALL cameras (for flexibility)
+        # Also check all cameras (for flexibility)
         for state in self.hass.states.async_all("camera"):
             entity_id = state.entity_id
-            friendly_name = state.attributes.get("friendly_name", "").lower()
+            if entity_id in self.selected_cameras:
+                continue  # Already added
             
-            if camera_input_lower in entity_id.lower() or camera_input_lower in friendly_name:
-                return entity_id
+            friendly_name = state.attributes.get("friendly_name", "")
+            entity_suffix = entity_id.replace("camera.", "")
+            
+            camera_matches.append({
+                "entity_id": entity_id,
+                "friendly_name": friendly_name,
+                "friendly_norm": self._normalize_name(friendly_name),
+                "entity_suffix": entity_suffix,
+                "entity_norm": self._normalize_name(entity_suffix),
+            })
+        
+        # Priority 1: Exact match on entity_id
+        if camera_input_lower.startswith("camera."):
+            for cam in camera_matches:
+                if cam["entity_id"].lower() == camera_input_lower:
+                    return cam["entity_id"]
+        
+        # Priority 2: Exact match on friendly name (normalized)
+        for cam in camera_matches:
+            if cam["friendly_norm"] == camera_input_norm:
+                return cam["entity_id"]
+        
+        # Priority 3: Exact match on entity suffix (normalized)
+        for cam in camera_matches:
+            if cam["entity_norm"] == camera_input_norm:
+                return cam["entity_id"]
+        
+        # Priority 4: Friendly name contains input OR input contains friendly name
+        for cam in camera_matches:
+            if camera_input_norm in cam["friendly_norm"] or cam["friendly_norm"] in camera_input_norm:
+                return cam["entity_id"]
+        
+        # Priority 5: Entity suffix contains input
+        for cam in camera_matches:
+            if camera_input_norm in cam["entity_norm"] or cam["entity_norm"] in camera_input_norm:
+                return cam["entity_id"]
+        
+        # Priority 6: Any word match (e.g., "porch" matches "Front Porch")
+        input_words = set(camera_input_norm.split())
+        for cam in camera_matches:
+            friendly_words = set(cam["friendly_norm"].split())
+            entity_words = set(cam["entity_norm"].split())
+            
+            if input_words & friendly_words:  # Any common words
+                return cam["entity_id"]
+            if input_words & entity_words:
+                return cam["entity_id"]
         
         return None
 

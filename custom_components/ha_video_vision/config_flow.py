@@ -35,6 +35,8 @@ from .const import (
     # Cameras - NEW
     CONF_SELECTED_CAMERAS,
     DEFAULT_SELECTED_CAMERAS,
+    CONF_CAMERA_ALIASES,
+    DEFAULT_CAMERA_ALIASES,
     # Facial Recognition
     CONF_FACIAL_REC_URL,
     CONF_FACIAL_REC_ENABLED,
@@ -249,6 +251,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             menu_options=[
                 "provider",
                 "cameras",
+                "voice_aliases",
                 "facial_rec",
                 "video",
                 "notifications",
@@ -365,6 +368,59 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             }),
             description_placeholders={
                 "camera_count": str(len(camera_entities)),
+            },
+        )
+
+    async def async_step_voice_aliases(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle voice alias configuration."""
+        if user_input is not None:
+            # Parse aliases from text
+            aliases = {}
+            alias_text = user_input.get("alias_config", "")
+            
+            for line in alias_text.strip().split("\n"):
+                line = line.strip()
+                if not line or ":" not in line:
+                    continue
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    voice_name = parts[0].strip().lower()
+                    camera_id = parts[1].strip()
+                    if voice_name and camera_id:
+                        aliases[voice_name] = camera_id
+            
+            new_options = {**self._entry.options, CONF_CAMERA_ALIASES: aliases}
+            return self.async_create_entry(title="", data=new_options)
+
+        current = {**self._entry.data, **self._entry.options}
+        aliases = current.get(CONF_CAMERA_ALIASES, DEFAULT_CAMERA_ALIASES)
+        selected_cameras = current.get(CONF_SELECTED_CAMERAS, [])
+        
+        # Build current alias text
+        alias_lines = [f"{name}:{camera}" for name, camera in aliases.items()]
+        alias_text = "\n".join(alias_lines) if alias_lines else ""
+        
+        # Build hint showing available cameras
+        camera_hints = []
+        for entity_id in selected_cameras:
+            state = self.hass.states.get(entity_id)
+            if state:
+                friendly = state.attributes.get("friendly_name", entity_id)
+                camera_hints.append(f"{entity_id} ({friendly})")
+        
+        return self.async_show_form(
+            step_id="voice_aliases",
+            data_schema=vol.Schema({
+                vol.Optional("alias_config", default=alias_text): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        multiline=True,
+                    )
+                ),
+            }),
+            description_placeholders={
+                "available_cameras": "\n".join(camera_hints) if camera_hints else "No cameras selected",
             },
         )
 
