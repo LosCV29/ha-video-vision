@@ -1,0 +1,87 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select AI Provider",
+        "description": "Choose which AI provider to use for video analysis",
+        "data": {
+          "provider": "AI Provider"
+        }
+      },
+      "credentials": {
+        "title": "Configure {provider_name}",
+        "description": "Enter your API credentials. Default model: {default_model}",
+        "data": {
+          "vllm_url": "API Base URL",
+          "api_key": "API Key",
+          "vllm_model": "Model Name"
+        }
+      },
+      "cameras": {
+        "title": "Select Cameras",
+        "description": "Found {camera_count} cameras. {camera_hint}",
+        "data": {
+          "selected_cameras": "Cameras to analyze"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the API. Check your URL and API key."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "provider": "AI Provider Settings",
+          "cameras": "Select Cameras",
+          "facial_rec": "Facial Recognition",
+          "video": "Video Settings",
+          "notifications": "Notifications"
+        }
+      },
+      "provider": {
+        "title": "AI Provider Settings",
+        "data": {
+          "provider": "AI Provider",
+          "vllm_url": "API Base URL",
+          "api_key": "API Key",
+          "vllm_model": "Model Name"
+        }
+      },
+      "cameras": {
+        "title": "Select Cameras",
+        "description": "Found {camera_count} cameras in Home Assistant",
+        "data": {
+          "selected_cameras": "Enable these cameras for AI analysis"
+        }
+      },
+      "facial_rec": {
+        "title": "Facial Recognition",
+        "description": "Configure facial recognition server (requires separate DeepFace server)",
+        "data": {
+          "facial_rec_enabled": "Enable Facial Recognition",
+          "facial_rec_url": "DeepFace Server URL",
+          "facial_rec_confidence": "Minimum Confidence (%)"
+        }
+      },
+      "video": {
+        "title": "Video Settings",
+        "data": {
+          "video_duration": "Recording Duration (seconds)",
+          "snapshot_dir": "Snapshot Directory"
+        }
+      },
+      "notifications": {
+        "title": "Notification Settings",
+        "description": "Configure which devices receive AI analysis notifications",
+        "data": {
+          "notify_services_text": "Notify Services (comma-separated, e.g. notify.mobile_app_phone)",
+          "ios_devices_text": "iOS Devices (for image attachments)",
+          "cooldown_seconds": "Cooldown Between Notifications (seconds)",
+          "critical_alerts": "Send as Critical Alerts (iOS)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+analyze_camera:
+  name: Analyze Camera
+  description: Record video from camera, run facial recognition, and analyze with AI (video-only providers).
+  fields:
+    camera:
+      name: Camera
+      description: Camera name to analyze
+      required: true
+      example: "driveway"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Recording duration in seconds
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: seconds
+    user_query:
+      name: Question
+      description: Optional question to ask about what's on camera
+      required: false
+      example: "Is anyone at the door?"
+      selector:
+        text:
+    notify:
+      name: Send Notification
+      description: Send push notification with the result
+      required: false
+      default: false
+      selector:
+        boolean:
+
+record_clip:
+  name: Record Clip
+  description: Record a video clip from camera without analysis.
+  fields:
+    camera:
+      name: Camera
+      description: Camera name to record from
+      required: true
+      example: "porch"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Recording duration in seconds
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: seconds
+
+identify_faces:
+  name: Identify Faces
+  description: Run facial recognition on an image.
+  fields:
+    image_path:
+      name: Image Path
+      description: Path to image file
+      required: true
+      example: "/config/www/snapshots/test.jpg"
+      selector:
+        text:
