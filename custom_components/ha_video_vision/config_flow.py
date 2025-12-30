@@ -42,9 +42,15 @@ from .const import (
     DEFAULT_FACIAL_REC_URL,
     DEFAULT_FACIAL_REC_ENABLED,
     DEFAULT_FACIAL_REC_CONFIDENCE,
-    # Video
+    # Video - FULL SETTINGS
     CONF_VIDEO_DURATION,
+    CONF_VIDEO_WIDTH,
+    CONF_VIDEO_CRF,
+    CONF_FRAME_FOR_FACIAL,
     DEFAULT_VIDEO_DURATION,
+    DEFAULT_VIDEO_WIDTH,
+    DEFAULT_VIDEO_CRF,
+    DEFAULT_FRAME_FOR_FACIAL,
     # Snapshot
     CONF_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_DIR,
@@ -397,6 +403,12 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Handle video recording settings."""
         if user_input is not None:
+            # Convert string values to integers
+            if CONF_VIDEO_WIDTH in user_input:
+                user_input[CONF_VIDEO_WIDTH] = int(user_input[CONF_VIDEO_WIDTH])
+            if CONF_VIDEO_CRF in user_input:
+                user_input[CONF_VIDEO_CRF] = int(user_input[CONF_VIDEO_CRF])
+            
             new_options = {**self._entry.options, **user_input}
             return self.async_create_entry(title="", data=new_options)
 
@@ -410,6 +422,40 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                         CONF_VIDEO_DURATION,
                         default=current.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    vol.Optional(
+                        CONF_VIDEO_WIDTH,
+                        default=str(current.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH)),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {"label": "320p (Fastest, Smallest)", "value": "320"},
+                                {"label": "480p (Fast, Small)", "value": "480"},
+                                {"label": "640p (Balanced)", "value": "640"},
+                                {"label": "720p (Good Quality)", "value": "720"},
+                                {"label": "1080p (Best Quality, Largest)", "value": "1080"},
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_VIDEO_CRF,
+                        default=str(current.get(CONF_VIDEO_CRF, DEFAULT_VIDEO_CRF)),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {"label": "18 - Best Quality (Larger File)", "value": "18"},
+                                {"label": "23 - High Quality", "value": "23"},
+                                {"label": "28 - Balanced (Default)", "value": "28"},
+                                {"label": "32 - Smaller File", "value": "32"},
+                                {"label": "35 - Smallest File (Lower Quality)", "value": "35"},
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_FRAME_FOR_FACIAL,
+                        default=current.get(CONF_FRAME_FOR_FACIAL, DEFAULT_FRAME_FOR_FACIAL),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=90)),
                     vol.Optional(
                         CONF_SNAPSHOT_DIR,
                         default=current.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR),

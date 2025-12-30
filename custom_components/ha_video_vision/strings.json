@@ -67,8 +67,12 @@
       },
       "video": {
         "title": "Video Settings",
+        "description": "Configure video recording quality and compression",
         "data": {
           "video_duration": "Recording Duration (seconds)",
+          "video_width": "Video Resolution",
+          "video_crf": "Compression Quality (CRF)",
+          "frame_for_facial": "Frame # for Facial Recognition",
           "snapshot_dir": "Snapshot Directory"
         }
       },
