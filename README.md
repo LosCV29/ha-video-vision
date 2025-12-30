@@ -266,10 +266,62 @@ automation:
 
 ## 🤝 Works Great With
 
-- **[PolyVoice](https://github.com/YOUR_USERNAME/polyvoice)** - Voice control: "Check the driveway camera"
+- **[PolyVoice](https://github.com/LosCV29/polyvoice)** - Voice control: "Check the driveway camera"
 - **ESPHome Voice** - "Hey Mycroft, who's at the door?"
 - **Frigate** - Trigger on person detection
 - **Any RTSP Camera** - Reolink, Hikvision, Dahua, etc.
+
+---
+
+## 🎤 Voice Control Setup (with PolyVoice)
+
+HA Video Vision integrates seamlessly with [PolyVoice](https://github.com/LosCV29/polyvoice) for voice-controlled camera analysis.
+
+### Supported Voice Commands
+
+| Voice Pattern | Example |
+|---------------|---------|
+| "Check the [location] camera" | "Check the garage camera" |
+| "Is there anyone in [location]" | "Is there anyone in the backyard" |
+| "Who is in the [location]" | "Who is in the nursery" |
+| "What's happening in [location]" | "What's happening in the driveway" |
+
+### Setup Steps
+
+1. **Install both integrations**:
+   - HA Video Vision (this integration)
+   - PolyVoice (voice assistant)
+
+2. **Enable cameras in PolyVoice**:
+   - Settings → PolyVoice → Configure → Enable Cameras ✅
+
+3. **Configure Voice Aliases** (recommended):
+   - Settings → HA Video Vision → Configure → Voice Aliases
+   - Map simple names to camera entity IDs:
+   ```
+   garage:camera.garage_cam
+   nursery:camera.baby_room
+   backyard:camera.rear_yard
+   kitchen:camera.kitchen_cam
+   ```
+
+### How Camera Matching Works
+
+When you say "check the garage camera", the system:
+
+1. Extracts "garage" as the location
+2. Searches for a matching camera using this priority:
+   - **Voice aliases** (exact match first)
+   - **Camera friendly names** (e.g., "Garage Camera")
+   - **Entity IDs** (e.g., `camera.garage`)
+   - **Partial matches** (e.g., "garage" in "garage_rear")
+   - **Word matching** (e.g., "garage" in "Main Garage Cam")
+
+### Tips for Best Results
+
+- Use short, unique voice aliases (e.g., "garage", "baby", "porch")
+- Avoid similar names for different cameras
+- Test with: `ha_video_vision.analyze_camera` service in Developer Tools
 
 ---
 
