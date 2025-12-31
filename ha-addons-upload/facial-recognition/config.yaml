@@ -28,5 +28,4 @@ schema:
   min_face_confidence: float
   min_face_size: int
   model_name: str
-  detector_backend: list(opencv|ssd|mtcnn|retinaface|mediapipe)
-image: "ghcr.io/loscv29/ha-addon-facial-recognition-{arch}"
+  detector_backend: str
