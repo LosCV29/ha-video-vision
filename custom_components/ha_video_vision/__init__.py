@@ -452,6 +452,51 @@ class VideoAnalyzer:
             _LOGGER.debug("Could not get stream URL for %s: %s", entity_id, e)
             return None
 
+    def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
+        """Build ffmpeg command based on stream type (RTSP vs HLS/HTTP)."""
+        # Base command
+        cmd = ["ffmpeg", "-y"]
+
+        # Add protocol-specific options
+        if stream_url.startswith("rtsp://"):
+            # RTSP stream - use TCP transport for reliability
+            cmd.extend(["-rtsp_transport", "tcp"])
+        # For HLS/HTTP streams, no special transport needed
+
+        # Input
+        cmd.extend(["-i", stream_url])
+
+        # Duration and encoding
+        cmd.extend([
+            "-t", str(duration),
+            "-vf", f"scale={self.video_width}:-2",
+            "-r", "10",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "28",
+            "-an",
+            output_path
+        ])
+
+        return cmd
+
+    def _build_ffmpeg_frame_cmd(self, stream_url: str, output_path: str) -> list[str]:
+        """Build ffmpeg command to extract a single frame."""
+        cmd = ["ffmpeg", "-y"]
+
+        if stream_url.startswith("rtsp://"):
+            cmd.extend(["-rtsp_transport", "tcp"])
+
+        cmd.extend([
+            "-i", stream_url,
+            "-frames:v", "1",
+            "-vf", f"scale={self.video_width}:-2",
+            "-q:v", "2",
+            output_path
+        ])
+
+        return cmd
+
     async def record_clip(self, camera_input: str, duration: int = None) -> dict[str, Any]:
         """Record a video clip from camera."""
         duration = duration or self.video_duration
@@ -481,18 +526,8 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False, dir=self.snapshot_dir) as vf:
                 video_path = vf.name
             
-            cmd = [
-                "ffmpeg", "-y", "-rtsp_transport", "tcp",
-                "-i", stream_url,
-                "-t", str(duration),
-                "-vf", f"scale={self.video_width}:-2",
-                "-r", "10",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "28",
-                "-an",
-                video_path
-            ]
+            # Build command based on stream type (RTSP vs HLS/HTTP)
+            cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path)
             
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -557,29 +592,9 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
             
-            # Record video
-            video_cmd = [
-                "ffmpeg", "-y", "-rtsp_transport", "tcp",
-                "-i", stream_url,
-                "-t", str(duration),
-                "-vf", f"scale={self.video_width}:-2",
-                "-r", "10",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "28",
-                "-an",
-                video_path
-            ]
-            
-            # Extract frame from stream
-            frame_cmd = [
-                "ffmpeg", "-y", "-rtsp_transport", "tcp",
-                "-i", stream_url,
-                "-frames:v", "1",
-                "-vf", f"scale={self.video_width}:-2",
-                "-q:v", "2",
-                frame_path
-            ]
+            # Build commands based on stream type (RTSP vs HLS/HTTP)
+            video_cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path)
+            frame_cmd = self._build_ffmpeg_frame_cmd(stream_url, frame_path)
             
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
