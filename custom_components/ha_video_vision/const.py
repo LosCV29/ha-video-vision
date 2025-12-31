@@ -65,7 +65,7 @@ CONF_FACIAL_REC_CONFIDENCE: Final = "facial_rec_confidence"
 
 DEFAULT_FACIAL_REC_URL: Final = "http://localhost:8100"
 DEFAULT_FACIAL_REC_ENABLED: Final = False
-DEFAULT_FACIAL_REC_CONFIDENCE: Final = 50
+DEFAULT_FACIAL_REC_CONFIDENCE: Final = 35  # Lower = more lenient matching
 
 # =============================================================================
 # CAMERA CONFIGURATION - AUTO-DISCOVERY
