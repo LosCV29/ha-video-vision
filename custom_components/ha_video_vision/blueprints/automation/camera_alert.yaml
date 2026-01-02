@@ -1,7 +1,7 @@
 blueprint:
   name: "HA Video Vision - Camera Alert"
   description: >
-    When person is detected, record video, run AI analysis with facial recognition,
+    When person is detected, record video, run AI analysis,
     and send mobile notifications with snapshot. Works with iOS and Android via Nabu Casa.
   domain: automation
   author: "HA Video Vision Integration"
@@ -145,17 +145,8 @@ action:
         sequence:
           - variables:
               tag: "ha_video_vision_{{ camera_input }}"
-              notification_title: >
-                {% if result.identified_people and result.identified_people | length > 0 %}
-                {{ result.identified_people[0].name }} - {{ result.friendly_name }}
-                {% else %}
-                {{ result.friendly_name }}
-                {% endif %}
-              notification_message: >
-                {% if result.identified_people and result.identified_people | length > 0 %}
-                {% for person in result.identified_people %}{{ person.name }} ({{ person.confidence }}%){% if not loop.last %}, {% endif %}{% endfor %} -
-                {% endif %}
-                {{ result.description if result.description else "Motion detected on camera" }}
+              notification_title: "{{ result.friendly_name }}"
+              notification_message: "{{ result.description if result.description else 'Motion detected on camera' }}"
 
           # Send to all devices
           - repeat:
