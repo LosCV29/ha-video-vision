@@ -12,6 +12,9 @@ CONF_API_KEY: Final = "api_key"
 # Per-provider credential storage (for multi-provider switching)
 CONF_PROVIDER_CONFIGS: Final = "provider_configs"
 
+# Default provider selection (from configured providers)
+CONF_DEFAULT_PROVIDER: Final = "default_provider"
+
 # Provider choices - VIDEO ONLY (no image-only providers)
 PROVIDER_LOCAL: Final = "local"
 PROVIDER_GOOGLE: Final = "google"
@@ -42,6 +45,15 @@ PROVIDER_DEFAULT_MODELS: Final = {
 }
 
 DEFAULT_PROVIDER: Final = PROVIDER_OPENROUTER
+
+# =============================================================================
+# GAMING MODE (Local AI Fallback)
+# =============================================================================
+CONF_GAMING_MODE_ENTITY: Final = "gaming_mode_entity"
+CONF_CLOUD_FALLBACK_PROVIDER: Final = "cloud_fallback_provider"
+
+DEFAULT_GAMING_MODE_ENTITY: Final = "input_boolean.gaming_mode"
+DEFAULT_CLOUD_FALLBACK_PROVIDER: Final = PROVIDER_OPENROUTER
 
 # =============================================================================
 # AI CONFIGURATION

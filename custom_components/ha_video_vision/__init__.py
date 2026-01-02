@@ -26,12 +26,18 @@ from .const import (
     CONF_PROVIDER,
     CONF_API_KEY,
     CONF_PROVIDER_CONFIGS,
+    CONF_DEFAULT_PROVIDER,
     PROVIDER_LOCAL,
     PROVIDER_GOOGLE,
     PROVIDER_OPENROUTER,
     PROVIDER_BASE_URLS,
     PROVIDER_DEFAULT_MODELS,
     DEFAULT_PROVIDER,
+    # Gaming Mode
+    CONF_GAMING_MODE_ENTITY,
+    CONF_CLOUD_FALLBACK_PROVIDER,
+    DEFAULT_GAMING_MODE_ENTITY,
+    DEFAULT_CLOUD_FALLBACK_PROVIDER,
     # AI Settings
     CONF_VLLM_URL,
     CONF_VLLM_MODEL,
@@ -284,17 +290,20 @@ class VideoAnalyzer:
 
     def update_config(self, config: dict[str, Any]) -> None:
         """Update configuration."""
-        # Provider settings
-        self.provider = config.get(CONF_PROVIDER, DEFAULT_PROVIDER)
+        # Provider settings - use CONF_DEFAULT_PROVIDER first, fallback to CONF_PROVIDER for legacy
+        self.provider = config.get(CONF_DEFAULT_PROVIDER, config.get(CONF_PROVIDER, DEFAULT_PROVIDER))
         self.provider_configs = config.get(CONF_PROVIDER_CONFIGS, {})
 
+        # Get config for the active/default provider
         active_config = self.provider_configs.get(self.provider, {})
 
         if active_config:
+            # Use provider-specific config from provider_configs
             self.api_key = active_config.get("api_key", "")
             self.vllm_model = active_config.get("model", PROVIDER_DEFAULT_MODELS.get(self.provider, ""))
             self.base_url = active_config.get("base_url", PROVIDER_BASE_URLS.get(self.provider, ""))
         else:
+            # Fall back to top-level config (legacy/migration support)
             self.api_key = config.get(CONF_API_KEY, "")
             self.vllm_model = config.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS.get(self.provider, DEFAULT_VLLM_MODEL))
 
@@ -326,10 +335,87 @@ class VideoAnalyzer:
         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
         self.snapshot_quality = config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)
 
-        _LOGGER.info(
-            "HA Video Vision config updated - Provider: %s, Cameras: %d, Resolution: %dp",
+        # Gaming mode settings
+        self.gaming_mode_entity = config.get(CONF_GAMING_MODE_ENTITY, DEFAULT_GAMING_MODE_ENTITY)
+        self.cloud_fallback_provider = config.get(CONF_CLOUD_FALLBACK_PROVIDER, DEFAULT_CLOUD_FALLBACK_PROVIDER)
+
+        _LOGGER.warning(
+            "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp",
             self.provider, len(self.selected_cameras), self.video_width
         )
+        _LOGGER.warning(
+            "Gaming mode config - Entity: %s, Fallback: %s (NOTE: Only works when default provider is LOCAL)",
+            self.gaming_mode_entity, self.cloud_fallback_provider
+        )
+        # Log configured providers
+        if self.provider_configs:
+            configured = [p for p, c in self.provider_configs.items() if c.get("api_key") or p == PROVIDER_LOCAL]
+            _LOGGER.warning("Configured providers: %s", configured)
+
+    def _is_gaming_mode_active(self) -> bool:
+        """Check if gaming mode is active (local AI should be bypassed)."""
+        if not self.gaming_mode_entity:
+            _LOGGER.debug("Gaming mode entity not configured")
+            return False
+
+        state = self.hass.states.get(self.gaming_mode_entity)
+        if state is None:
+            # Entity doesn't exist - gaming mode not configured
+            _LOGGER.warning(
+                "Gaming mode entity '%s' not found - create input_boolean.gaming_mode helper",
+                self.gaming_mode_entity
+            )
+            return False
+
+        is_active = state.state == "on"
+        _LOGGER.warning(
+            "Gaming mode check: entity=%s, state=%s, active=%s",
+            self.gaming_mode_entity, state.state, is_active
+        )
+        return is_active
+
+    def _get_effective_provider(self) -> tuple[str, str, str]:
+        """Get the effective provider, considering gaming mode.
+
+        Returns: (provider, model, api_key)
+        """
+        gaming_active = self._is_gaming_mode_active()
+
+        _LOGGER.warning(
+            "Provider selection - Default: %s, Gaming mode: %s, Fallback: %s",
+            self.provider, gaming_active, self.cloud_fallback_provider
+        )
+
+        # Check if we need to switch from local to cloud
+        if self.provider == PROVIDER_LOCAL and gaming_active:
+            fallback = self.cloud_fallback_provider
+            fallback_config = self.provider_configs.get(fallback, {})
+
+            fallback_model = fallback_config.get("model", PROVIDER_DEFAULT_MODELS.get(fallback, ""))
+            fallback_api_key = fallback_config.get("api_key", "")
+
+            if not fallback_api_key:
+                _LOGGER.error(
+                    "Gaming mode active but fallback provider '%s' has no API key configured! "
+                    "Configure %s in Options first.",
+                    fallback, fallback
+                )
+                # Fall back to local anyway since cloud isn't configured
+                return (self.provider, self.vllm_model, self.api_key)
+
+            _LOGGER.warning(
+                "GAMING MODE ACTIVE - Switching from LOCAL to %s (model: %s)",
+                fallback, fallback_model
+            )
+
+            return (fallback, fallback_model, fallback_api_key)
+
+        # Return current provider settings
+        _LOGGER.warning(
+            "Using default provider: %s, model: %s",
+            self.provider, self.vllm_model
+        )
+        return (self.provider, self.vllm_model, self.api_key)
 
     def _normalize_name(self, name: str) -> str:
         """Normalize a name for comparison (lowercase, remove special chars)."""
@@ -640,7 +726,12 @@ class VideoAnalyzer:
     ) -> dict[str, Any]:
         """Analyze camera using video and optional facial recognition."""
         duration = duration or self.video_duration
-        
+
+        _LOGGER.warning(
+            "Camera analysis requested - Input: '%s', Provider: %s, Model: %s",
+            camera_input, self.provider, self.vllm_model
+        )
+
         entity_id = self._find_camera_entity(camera_input)
         if not entity_id:
             available = ", ".join(self.selected_cameras) if self.selected_cameras else "None configured"
@@ -675,9 +766,14 @@ class VideoAnalyzer:
             names = [p["name"] for p in identified_people]
             prompt += f"\n\nIdentified people in frame: {', '.join(names)}"
         
-        # Send to AI provider
-        description = await self._analyze_with_provider(video_bytes, frame_bytes, prompt)
-        
+        # Send to AI provider (returns description and effective provider used)
+        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt)
+
+        _LOGGER.warning(
+            "Analysis complete for %s (%s) - Provider: %s, Response length: %d chars",
+            friendly_name, entity_id, provider_used, len(description) if description else 0
+        )
+
         # Save snapshot
         snapshot_path = None
         if frame_bytes:
@@ -688,12 +784,15 @@ class VideoAnalyzer:
                     await f.write(frame_bytes)
             except Exception as e:
                 _LOGGER.error("Failed to save snapshot: %s", e)
-        
+
         person_detected = bool(identified_people) or any(
-            word in description.lower() 
+            word in description.lower()
             for word in ["person", "people", "someone", "man", "woman", "child"]
         )
-        
+
+        # Include gaming mode debug info
+        gaming_mode_active = self._is_gaming_mode_active()
+
         return {
             "success": True,
             "camera": entity_id,
@@ -703,30 +802,54 @@ class VideoAnalyzer:
             "person_detected": person_detected,
             "snapshot_path": snapshot_path,
             "snapshot_url": f"/media/local/ha_video_vision/{safe_name}_latest.jpg" if snapshot_path else None,
-            "provider_used": self.provider,
+            "provider_used": provider_used,
+            "default_provider": self.provider,
+            "gaming_mode_active": gaming_mode_active,
+            "gaming_mode_entity": self.gaming_mode_entity,
         }
 
     async def _analyze_with_provider(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str
-    ) -> str:
-        """Send video/image to the configured AI provider."""
-        
-        if self.provider == PROVIDER_GOOGLE:
-            return await self._analyze_google(video_bytes, frame_bytes, prompt)
-        elif self.provider == PROVIDER_OPENROUTER:
-            return await self._analyze_openrouter(video_bytes, frame_bytes, prompt)
-        elif self.provider == PROVIDER_LOCAL:
-            return await self._analyze_local(video_bytes, frame_bytes, prompt)
-        else:
-            return "Unknown provider configured"
+    ) -> tuple[str, str]:
+        """Send video/image to the configured AI provider.
 
-    async def _analyze_google(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str) -> str:
+        Returns: (description, provider_used)
+        """
+        # Get effective provider (may switch if gaming mode is active)
+        effective_provider, effective_model, effective_api_key = self._get_effective_provider()
+
+        media_type = "video" if video_bytes else ("image" if frame_bytes else "none")
+        _LOGGER.warning(
+            "Sending %s to AI - Provider: %s, Model: %s, Base URL: %s",
+            media_type, effective_provider, effective_model,
+            self.base_url if effective_provider == PROVIDER_LOCAL else "default"
+        )
+
+        if effective_provider == PROVIDER_GOOGLE:
+            result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
+        elif effective_provider == PROVIDER_OPENROUTER:
+            result = await self._analyze_openrouter(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
+        elif effective_provider == PROVIDER_LOCAL:
+            result = await self._analyze_local(video_bytes, frame_bytes, prompt)
+        else:
+            result = "Unknown provider configured"
+
+        return result, effective_provider
+
+    async def _analyze_google(
+        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
+        model: str = None, api_key: str = None
+    ) -> str:
         """Analyze using Google Gemini."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
-        
+
+        # Use provided overrides or fall back to config
+        model = model or self.vllm_model
+        api_key = api_key or self.api_key
+
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.vllm_model}:generateContent?key={self.api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             
             parts = [{"text": prompt}]
             
@@ -759,30 +882,68 @@ class VideoAnalyzer:
                 async with self._session.post(url, json=payload) as response:
                     if response.status == 200:
                         result = await response.json()
-                        return result["candidates"][0]["content"]["parts"][0]["text"]
+
+                        # Handle various Gemini response structures
+                        candidates = result.get("candidates", [])
+                        if not candidates:
+                            # Check for prompt feedback (safety blocking)
+                            prompt_feedback = result.get("promptFeedback", {})
+                            block_reason = prompt_feedback.get("blockReason")
+                            if block_reason:
+                                _LOGGER.warning("Gemini blocked request: %s", block_reason)
+                                return f"Content blocked by safety filters: {block_reason}"
+                            return "No response from Gemini (empty candidates)"
+
+                        candidate = candidates[0]
+
+                        # Check finish reason
+                        finish_reason = candidate.get("finishReason", "")
+                        if finish_reason == "SAFETY":
+                            safety_ratings = candidate.get("safetyRatings", [])
+                            _LOGGER.warning("Gemini safety block: %s", safety_ratings)
+                            return "Content blocked by safety filters"
+
+                        # Get content
+                        content = candidate.get("content", {})
+                        parts = content.get("parts", [])
+
+                        if not parts:
+                            _LOGGER.warning("Gemini returned empty parts. Full response: %s", result)
+                            return "No text in Gemini response"
+
+                        # Extract text from parts
+                        text_parts = [p.get("text", "") for p in parts if "text" in p]
+                        return "".join(text_parts) if text_parts else "No text in response"
                     else:
                         error = await response.text()
                         _LOGGER.error("Gemini error: %s", error[:500])
                         return f"Analysis failed: {response.status}"
-                        
+
         except Exception as e:
             _LOGGER.error("Gemini analysis error: %s", e)
             return f"Analysis error: {str(e)}"
 
-    async def _analyze_openrouter(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str) -> str:
+    async def _analyze_openrouter(
+        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
+        model: str = None, api_key: str = None
+    ) -> str:
         """Analyze using OpenRouter with video support."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
-        
+
+        # Use provided overrides or fall back to config
+        model = model or self.vllm_model
+        api_key = api_key or self.api_key
+
         try:
             url = "https://openrouter.ai/api/v1/chat/completions"
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            
+
             content = []
-            
+
             if video_bytes:
                 video_b64 = base64.b64encode(video_bytes).decode()
                 content.append({
@@ -799,11 +960,11 @@ class VideoAnalyzer:
                         "url": f"data:image/jpeg;base64,{image_b64}"
                     }
                 })
-            
+
             content.append({"type": "text", "text": prompt})
-            
+
             payload = {
-                "model": self.vllm_model,
+                "model": model,
                 "messages": [{"role": "user", "content": content}],
                 "max_tokens": self.vllm_max_tokens,
                 "temperature": self.vllm_temperature,
