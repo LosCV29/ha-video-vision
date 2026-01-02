@@ -892,17 +892,6 @@ class VideoAnalyzer:
             self.base_url if effective_provider == PROVIDER_LOCAL else "default"
         )
 
-        # Add anti-hallucination instructions for cloud providers
-        # Small cloud models (especially free ones) tend to guess/hallucinate identities
-        if effective_provider in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
-            anti_hallucination = (
-                "\n\nIMPORTANT: Do NOT identify or name specific people. "
-                "Do NOT guess anyone's identity. Only describe physical characteristics "
-                "(e.g., 'a person in a red shirt') without naming individuals. "
-                "Never say specific names like 'John' or 'the homeowner'."
-            )
-            prompt = prompt + anti_hallucination
-
         if effective_provider == PROVIDER_GOOGLE:
             result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
         elif effective_provider == PROVIDER_OPENROUTER:
@@ -948,8 +937,17 @@ class VideoAnalyzer:
                     }
                 })
             
+            # System instruction to prevent hallucination of identities
+            system_instruction = (
+                "You are a security camera analyst. Describe ONLY what you can actually see. "
+                "NEVER identify or name specific people. NEVER guess identities. "
+                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
+            )
+
             payload = {
                 "contents": [{"parts": parts}],
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
                 "generationConfig": {
                     "temperature": self.vllm_temperature,
                     "maxOutputTokens": self.vllm_max_tokens,
@@ -1041,9 +1039,20 @@ class VideoAnalyzer:
 
             content.append({"type": "text", "text": prompt})
 
+            # System message to prevent hallucination of identities
+            system_message = (
+                "You are a security camera analyst. Describe ONLY what you can actually see. "
+                "NEVER identify or name specific people. NEVER guess identities. "
+                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
+            )
+
             payload = {
                 "model": model,
-                "messages": [{"role": "user", "content": content}],
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": content}
+                ],
                 "max_tokens": self.vllm_max_tokens,
                 "temperature": self.vllm_temperature,
             }
