@@ -10,11 +10,17 @@
       },
       "credentials": {
         "title": "Configure {provider_name}",
-        "description": "Enter your API credentials. Default model: {default_model}",
+        "description": "Enter your API credentials",
         "data": {
           "vllm_url": "API Base URL",
-          "api_key": "API Key",
-          "vllm_model": "Model Name"
+          "api_key": "API Key"
+        }
+      },
+      "select_model": {
+        "title": "Select Model",
+        "description": "Found {model_count} vision models for {provider_name}",
+        "data": {
+          "vllm_model": "Model"
         }
       },
       "cameras": {
@@ -27,6 +33,9 @@
     },
     "error": {
       "cannot_connect": "Cannot connect to the API. Check your URL and API key."
+    },
+    "abort": {
+      "single_instance_allowed": "Already configured. Use Configure to add more providers."
     }
   },
   "options": {
@@ -34,7 +43,9 @@
       "init": {
         "menu_options": {
           "default_provider": "Select Default Provider",
-          "provider": "Provider Credentials",
+          "configure_google": "Configure Google Gemini",
+          "configure_openrouter": "Configure OpenRouter",
+          "configure_local": "Configure Local vLLM",
           "cameras": "Select Cameras",
           "voice_aliases": "Voice Aliases",
           "facial_rec": "Facial Recognition",
@@ -44,18 +55,51 @@
       },
       "default_provider": {
         "title": "Select Default Provider",
-        "description": "Choose which AI provider to use for camera analysis.",
+        "description": "Choose which configured provider to use for camera analysis.",
         "data": {
           "default_provider": "Default Provider"
         }
       },
-      "provider": {
-        "title": "Provider Credentials",
-        "description": "Configure credentials for {provider_name}",
+      "configure_google": {
+        "title": "Configure Google Gemini",
+        "description": "Enter your Google AI API key. Leave empty to remove this provider.",
         "data": {
-          "vllm_url": "API Base URL",
-          "api_key": "API Key",
-          "vllm_model": "Model Name"
+          "api_key": "Google AI API Key"
+        }
+      },
+      "google_model": {
+        "title": "Select Google Model",
+        "description": "Choose a vision model from your Google AI account.",
+        "data": {
+          "vllm_model": "Model"
+        }
+      },
+      "configure_openrouter": {
+        "title": "Configure OpenRouter",
+        "description": "Enter your OpenRouter API key. Leave empty to remove this provider.",
+        "data": {
+          "api_key": "OpenRouter API Key"
+        }
+      },
+      "openrouter_model": {
+        "title": "Select OpenRouter Model",
+        "description": "Choose a vision model from OpenRouter.",
+        "data": {
+          "vllm_model": "Model"
+        }
+      },
+      "configure_local": {
+        "title": "Configure Local vLLM",
+        "description": "Enter your local vLLM server URL. Leave empty to remove this provider.",
+        "data": {
+          "vllm_url": "Server URL"
+        }
+      },
+      "local_model": {
+        "title": "Select Local Model",
+        "description": "Choose a model from your local server.",
+        "data": {
+          "vllm_model": "Model"
         }
       },
       "cameras": {
@@ -99,6 +143,9 @@
           "vllm_temperature": "Temperature (creativity)"
         }
       }
+    },
+    "abort": {
+      "no_providers_configured": "No providers configured. Use the provider configuration options first."
     }
   }
 }
