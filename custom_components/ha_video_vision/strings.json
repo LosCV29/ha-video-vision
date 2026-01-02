@@ -49,7 +49,6 @@
           "configure_local": "Configure Local vLLM",
           "cameras": "Select Cameras",
           "voice_aliases": "Voice Aliases",
-          "facial_rec": "Facial Recognition",
           "video_quality": "Video Quality",
           "ai_settings": "AI Settings"
         }
@@ -123,15 +122,6 @@
         "description": "Map simple voice names to cameras. One per line: alias:camera.entity_id\n\nExample:\nbackyard:camera.backyard_fluent\nfront porch:camera.front_porch\ndriveway:camera.driveway_cam\n\nYour cameras:\n{available_cameras}",
         "data": {
           "alias_config": "Voice Aliases (one per line)"
-        }
-      },
-      "facial_rec": {
-        "title": "Facial Recognition",
-        "description": "Configure facial recognition server (requires separate DeepFace server)",
-        "data": {
-          "facial_rec_enabled": "Enable Facial Recognition",
-          "facial_rec_url": "DeepFace Server URL",
-          "facial_rec_confidence": "Minimum Confidence (%)"
         }
       },
       "video_quality": {

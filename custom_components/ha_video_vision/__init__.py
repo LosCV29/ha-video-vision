@@ -47,13 +47,6 @@ from .const import (
     DEFAULT_VLLM_MODEL,
     DEFAULT_VLLM_MAX_TOKENS,
     DEFAULT_VLLM_TEMPERATURE,
-    # Facial Recognition
-    CONF_FACIAL_REC_URL,
-    CONF_FACIAL_REC_ENABLED,
-    CONF_FACIAL_REC_CONFIDENCE,
-    DEFAULT_FACIAL_REC_URL,
-    DEFAULT_FACIAL_REC_ENABLED,
-    DEFAULT_FACIAL_REC_CONFIDENCE,
     # Cameras - Auto-Discovery
     CONF_SELECTED_CAMERAS,
     DEFAULT_SELECTED_CAMERAS,
@@ -72,12 +65,10 @@ from .const import (
     # Services
     SERVICE_ANALYZE_CAMERA,
     SERVICE_RECORD_CLIP,
-    SERVICE_IDENTIFY_FACES,
     # Attributes
     ATTR_CAMERA,
     ATTR_DURATION,
     ATTR_USER_QUERY,
-    ATTR_IMAGE_PATH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -158,12 +149,6 @@ SERVICE_RECORD_SCHEMA = vol.Schema(
     }
 )
 
-SERVICE_IDENTIFY_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_IMAGE_PATH): cv.string,
-    }
-)
-
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the HA Video Vision component."""
@@ -224,14 +209,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Handle record_clip service call."""
         camera = call.data[ATTR_CAMERA]
         duration = call.data.get(ATTR_DURATION, 3)
-        
-        return await analyzer.record_clip(camera, duration)
 
-    async def handle_identify_faces(call: ServiceCall) -> dict[str, Any]:
-        """Handle identify_faces service call."""
-        image_path = call.data[ATTR_IMAGE_PATH]
-        
-        return await analyzer.identify_faces_from_file(image_path)
+        return await analyzer.record_clip(camera, duration)
 
     # Register services with response support
     hass.services.async_register(
@@ -241,20 +220,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         schema=SERVICE_ANALYZE_SCHEMA,
         supports_response=True,
     )
-    
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_RECORD_CLIP,
         handle_record_clip,
         schema=SERVICE_RECORD_SCHEMA,
-        supports_response=True,
-    )
-    
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_IDENTIFY_FACES,
-        handle_identify_faces,
-        schema=SERVICE_IDENTIFY_SCHEMA,
         supports_response=True,
     )
 
@@ -278,8 +249,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Remove services
     hass.services.async_remove(DOMAIN, SERVICE_ANALYZE_CAMERA)
     hass.services.async_remove(DOMAIN, SERVICE_RECORD_CLIP)
-    hass.services.async_remove(DOMAIN, SERVICE_IDENTIFY_FACES)
-    
+
     hass.data[DOMAIN].pop(entry.entry_id, None)
     return True
 
@@ -320,11 +290,6 @@ class VideoAnalyzer:
         # AI settings
         self.vllm_max_tokens = config.get(CONF_VLLM_MAX_TOKENS, DEFAULT_VLLM_MAX_TOKENS)
         self.vllm_temperature = config.get(CONF_VLLM_TEMPERATURE, DEFAULT_VLLM_TEMPERATURE)
-
-        # Facial recognition
-        self.facial_rec_url = config.get(CONF_FACIAL_REC_URL, DEFAULT_FACIAL_REC_URL)
-        self.facial_rec_enabled = config.get(CONF_FACIAL_REC_ENABLED, DEFAULT_FACIAL_REC_ENABLED)
-        self.facial_rec_confidence = config.get(CONF_FACIAL_REC_CONFIDENCE, DEFAULT_FACIAL_REC_CONFIDENCE)
 
         # Auto-discovered cameras (list of entity_ids)
         self.selected_cameras = config.get(CONF_SELECTED_CAMERAS, DEFAULT_SELECTED_CAMERAS)
@@ -714,13 +679,15 @@ class VideoAnalyzer:
                 except Exception:
                     pass
 
-    async def _record_video_and_frames(self, entity_id: str, duration: int) -> tuple[bytes | None, bytes | None, bytes | None]:
-        """Record video and extract frames from camera entity."""
+    async def _record_video_and_frames(self, entity_id: str, duration: int) -> tuple[bytes | None, bytes | None]:
+        """Record video and extract frames from camera entity.
+
+        Returns: (video_bytes, frame_bytes)
+        """
         stream_url = await self._get_stream_url(entity_id)
 
         video_bytes = None
         frame_bytes = None
-        facial_frame_bytes = None
 
         if not stream_url:
             # No stream URL (cloud camera like Ring/Nest) - use snapshot only
@@ -730,28 +697,24 @@ class VideoAnalyzer:
                 "If images are stale, increase 'Capture Delay' in the blueprint.",
                 entity_id
             )
-            facial_frame_bytes = await self._get_camera_snapshot(
+            frame_bytes = await self._get_camera_snapshot(
                 entity_id, retries=4, delay=1.5
             )
-            frame_bytes = facial_frame_bytes
-            return video_bytes, frame_bytes, facial_frame_bytes
+            return video_bytes, frame_bytes
 
-        # Has stream URL - get snapshot first for facial recognition
-        facial_frame_bytes = await self._get_camera_snapshot(entity_id)
-        
         video_path = None
         frame_path = None
-        
+
         try:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as vf:
                 video_path = vf.name
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
-            
+
             # Build commands based on stream type (RTSP vs HLS/HTTP)
             video_cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path)
             frame_cmd = self._build_ffmpeg_frame_cmd(stream_url, frame_path)
-            
+
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -762,27 +725,25 @@ class VideoAnalyzer:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL
             )
-            
+
             await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
             await asyncio.wait_for(frame_proc.wait(), timeout=10)
-            
+
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 async with aiofiles.open(video_path, 'rb') as f:
                     video_bytes = await f.read()
-            
+
             if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
                 async with aiofiles.open(frame_path, 'rb') as f:
                     frame_bytes = await f.read()
-            
-            # Use HA snapshot for facial if we don't have one yet
-            if not facial_frame_bytes:
-                facial_frame_bytes = frame_bytes
-            
-            return video_bytes, frame_bytes, facial_frame_bytes
-            
+
+            return video_bytes, frame_bytes
+
         except Exception as e:
             _LOGGER.error("Error recording video from %s: %s", entity_id, e)
-            return None, facial_frame_bytes, facial_frame_bytes
+            # Try to get a snapshot as fallback
+            fallback_frame = await self._get_camera_snapshot(entity_id)
+            return None, fallback_frame
         finally:
             for path in [video_path, frame_path]:
                 if path and os.path.exists(path):
@@ -794,7 +755,7 @@ class VideoAnalyzer:
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = ""
     ) -> dict[str, Any]:
-        """Analyze camera using video and optional facial recognition."""
+        """Analyze camera using video and AI vision."""
         duration = duration or self.video_duration
 
         _LOGGER.warning(
@@ -815,11 +776,7 @@ class VideoAnalyzer:
         safe_name = entity_id.replace("camera.", "").replace(".", "_")
         
         # Record video and get frames
-        video_bytes, frame_bytes, facial_frame_bytes = await self._record_video_and_frames(entity_id, duration)
-
-        # NOTE: Facial recognition is NOT run during analyze_camera to prevent
-        # AI hallucination issues. Use the separate identify_faces service if needed.
-        # The identify_faces service can be called independently with a snapshot.
+        video_bytes, frame_bytes = await self._record_video_and_frames(entity_id, duration)
 
         # Prepare prompt
         if user_query:
@@ -850,8 +807,7 @@ class VideoAnalyzer:
             except Exception as e:
                 _LOGGER.error("Failed to save snapshot: %s", e)
 
-        # Check for person-related words in AI description only
-        # (facial recognition is handled separately via identify_faces service)
+        # Check for person-related words in AI description
         description_text = description or ""
         person_detected = any(
             word in description_text.lower()
@@ -1136,51 +1092,3 @@ class VideoAnalyzer:
         except Exception as e:
             _LOGGER.error("Local vLLM error: %s", e)
             return f"Analysis error: {str(e)}"
-
-    async def _identify_faces(self, image_bytes: bytes) -> list[dict]:
-        """Send image to facial recognition server."""
-        if not self.facial_rec_enabled or not self.facial_rec_url:
-            return []
-        
-        try:
-            image_b64 = base64.b64encode(image_bytes).decode()
-            
-            async with asyncio.timeout(15):
-                async with self._session.post(
-                    f"{self.facial_rec_url}/identify",
-                    json={"image_base64": image_b64},
-                    headers={"Content-Type": "application/json"},
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        people = result.get("people", [])
-                        
-                        return [
-                            {"name": p["name"], "confidence": p["confidence"]}
-                            for p in people
-                            if p.get("name") != "Unknown" and p.get("confidence", 0) >= self.facial_rec_confidence
-                        ]
-                    return []
-                    
-        except Exception as e:
-            _LOGGER.warning("Facial recognition error: %s", e)
-            return []
-
-    async def identify_faces_from_file(self, image_path: str) -> dict[str, Any]:
-        """Identify faces from an image file."""
-        if not os.path.exists(image_path):
-            return {"success": False, "error": f"Image not found: {image_path}"}
-
-        try:
-            async with aiofiles.open(image_path, 'rb') as f:
-                image_bytes = await f.read()
-
-            people = await self._identify_faces(image_bytes)
-
-            return {
-                "success": True,
-                "faces_detected": len(people),
-                "people": people,
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}

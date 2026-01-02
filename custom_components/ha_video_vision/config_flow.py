@@ -43,13 +43,6 @@ from .const import (
     DEFAULT_SELECTED_CAMERAS,
     CONF_CAMERA_ALIASES,
     DEFAULT_CAMERA_ALIASES,
-    # Facial Recognition
-    CONF_FACIAL_REC_URL,
-    CONF_FACIAL_REC_ENABLED,
-    CONF_FACIAL_REC_CONFIDENCE,
-    DEFAULT_FACIAL_REC_URL,
-    DEFAULT_FACIAL_REC_ENABLED,
-    DEFAULT_FACIAL_REC_CONFIDENCE,
     # Video Settings
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
@@ -333,7 +326,6 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 "configure_local": "Configure Local vLLM",
                 "cameras": "Select Cameras",
                 "voice_aliases": "Voice Aliases",
-                "facial_rec": "Facial Recognition",
                 "video_quality": "Video Quality",
                 "ai_settings": "AI Settings",
             },
@@ -797,25 +789,6 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={
                 "available_cameras": "\n".join(camera_hints) if camera_hints else "No cameras selected",
             },
-        )
-
-    async def async_step_facial_rec(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle facial recognition settings."""
-        if user_input is not None:
-            new_options = {**self._entry.options, **user_input}
-            return self.async_create_entry(title="", data=new_options)
-
-        current = {**self._entry.data, **self._entry.options}
-
-        return self.async_show_form(
-            step_id="facial_rec",
-            data_schema=vol.Schema({
-                vol.Required(CONF_FACIAL_REC_ENABLED, default=current.get(CONF_FACIAL_REC_ENABLED, DEFAULT_FACIAL_REC_ENABLED)): bool,
-                vol.Required(CONF_FACIAL_REC_URL, default=current.get(CONF_FACIAL_REC_URL, DEFAULT_FACIAL_REC_URL)): str,
-                vol.Required(CONF_FACIAL_REC_CONFIDENCE, default=current.get(CONF_FACIAL_REC_CONFIDENCE, DEFAULT_FACIAL_REC_CONFIDENCE)): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
-            }),
         )
 
     async def async_step_video_quality(

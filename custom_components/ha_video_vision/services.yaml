@@ -1,6 +1,6 @@
 analyze_camera:
   name: Analyze Camera
-  description: Record video from camera, run facial recognition, and analyze with AI.
+  description: Record video from camera and analyze with AI vision.
   fields:
     camera:
       name: Camera
@@ -52,14 +52,3 @@ record_clip:
           step: 1
           unit_of_measurement: seconds
 
-identify_faces:
-  name: Identify Faces
-  description: Run facial recognition on an image file.
-  fields:
-    image_path:
-      name: Image Path
-      description: Path to image file
-      required: true
-      example: "/config/www/snapshots/test.jpg"
-      selector:
-        text:
