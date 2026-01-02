@@ -779,12 +779,43 @@ class VideoAnalyzer:
                 async with self._session.post(url, json=payload) as response:
                     if response.status == 200:
                         result = await response.json()
-                        return result["candidates"][0]["content"]["parts"][0]["text"]
+
+                        # Handle various Gemini response structures
+                        candidates = result.get("candidates", [])
+                        if not candidates:
+                            # Check for prompt feedback (safety blocking)
+                            prompt_feedback = result.get("promptFeedback", {})
+                            block_reason = prompt_feedback.get("blockReason")
+                            if block_reason:
+                                _LOGGER.warning("Gemini blocked request: %s", block_reason)
+                                return f"Content blocked by safety filters: {block_reason}"
+                            return "No response from Gemini (empty candidates)"
+
+                        candidate = candidates[0]
+
+                        # Check finish reason
+                        finish_reason = candidate.get("finishReason", "")
+                        if finish_reason == "SAFETY":
+                            safety_ratings = candidate.get("safetyRatings", [])
+                            _LOGGER.warning("Gemini safety block: %s", safety_ratings)
+                            return "Content blocked by safety filters"
+
+                        # Get content
+                        content = candidate.get("content", {})
+                        parts = content.get("parts", [])
+
+                        if not parts:
+                            _LOGGER.warning("Gemini returned empty parts. Full response: %s", result)
+                            return "No text in Gemini response"
+
+                        # Extract text from parts
+                        text_parts = [p.get("text", "") for p in parts if "text" in p]
+                        return "".join(text_parts) if text_parts else "No text in response"
                     else:
                         error = await response.text()
                         _LOGGER.error("Gemini error: %s", error[:500])
                         return f"Analysis failed: {response.status}"
-                        
+
         except Exception as e:
             _LOGGER.error("Gemini analysis error: %s", e)
             return f"Analysis error: {str(e)}"
