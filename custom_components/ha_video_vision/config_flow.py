@@ -60,6 +60,11 @@ from .const import (
     CONF_SNAPSHOT_QUALITY,
     DEFAULT_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_QUALITY,
+    # Gaming mode
+    CONF_GAMING_MODE_ENTITY,
+    CONF_CLOUD_FALLBACK_PROVIDER,
+    DEFAULT_GAMING_MODE_ENTITY,
+    DEFAULT_CLOUD_FALLBACK_PROVIDER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -322,6 +327,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             menu_options=[
                 "default_provider",
+                "gaming_mode",
                 "configure_google",
                 "configure_openrouter",
                 "configure_local",
@@ -378,6 +384,65 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                     )
                 ),
             }),
+        )
+
+    # ==================== GAMING MODE ====================
+    async def async_step_gaming_mode(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure gaming mode (cloud fallback) settings."""
+        current = {**self._entry.data, **self._entry.options}
+        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
+
+        if user_input is not None:
+            new_options = {**self._entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
+
+        # Build cloud provider options (only show configured cloud providers)
+        cloud_provider_options = []
+        for provider_key in [PROVIDER_GOOGLE, PROVIDER_OPENROUTER]:
+            if provider_key in provider_configs:
+                config = provider_configs[provider_key]
+                if config.get("api_key"):
+                    cloud_provider_options.append(
+                        selector.SelectOptionDict(
+                            value=provider_key,
+                            label=PROVIDER_NAMES[provider_key]
+                        )
+                    )
+
+        # If no cloud providers configured, show all options
+        if not cloud_provider_options:
+            cloud_provider_options = [
+                selector.SelectOptionDict(value=PROVIDER_GOOGLE, label=PROVIDER_NAMES[PROVIDER_GOOGLE]),
+                selector.SelectOptionDict(value=PROVIDER_OPENROUTER, label=PROVIDER_NAMES[PROVIDER_OPENROUTER]),
+            ]
+
+        return self.async_show_form(
+            step_id="gaming_mode",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_GAMING_MODE_ENTITY,
+                    default=current.get(CONF_GAMING_MODE_ENTITY, DEFAULT_GAMING_MODE_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="input_boolean",
+                        multiple=False,
+                    )
+                ),
+                vol.Optional(
+                    CONF_CLOUD_FALLBACK_PROVIDER,
+                    default=current.get(CONF_CLOUD_FALLBACK_PROVIDER, DEFAULT_CLOUD_FALLBACK_PROVIDER),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=cloud_provider_options,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }),
+            description_placeholders={
+                "hint": "When gaming mode is ON and using Local vLLM, requests will use the cloud provider instead.",
+            },
         )
 
     # ==================== GOOGLE GEMINI ====================
