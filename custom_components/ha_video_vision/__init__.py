@@ -898,6 +898,17 @@ class VideoAnalyzer:
             self.base_url if effective_provider == PROVIDER_LOCAL else "default"
         )
 
+        # Add anti-hallucination instructions for cloud providers
+        # Small cloud models (especially free ones) tend to guess/hallucinate identities
+        if effective_provider in (PROVIDER_GOOGLE, PROVIDER_OPENROUTER):
+            anti_hallucination = (
+                "\n\nIMPORTANT: Do NOT identify or name specific people. "
+                "Do NOT guess anyone's identity. Only describe physical characteristics "
+                "(e.g., 'a person in a red shirt') without naming individuals. "
+                "Never say specific names like 'John' or 'the homeowner'."
+            )
+            prompt = prompt + anti_hallucination
+
         if effective_provider == PROVIDER_GOOGLE:
             result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
         elif effective_provider == PROVIDER_OPENROUTER:
