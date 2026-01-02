@@ -113,8 +113,10 @@ async def async_import_blueprints(hass: HomeAssistant) -> None:
                 _LOGGER.warning("Blueprint not found: %s", source_file)
                 continue
 
-            # Create target directory if it doesn't exist
-            target_dir.mkdir(parents=True, exist_ok=True)
+            # Create target directory if it doesn't exist (run in executor to avoid blocking)
+            await hass.async_add_executor_job(
+                lambda: target_dir.mkdir(parents=True, exist_ok=True)
+            )
 
             # Copy blueprint if it doesn't exist or is outdated
             should_copy = False
@@ -130,7 +132,10 @@ async def async_import_blueprints(hass: HomeAssistant) -> None:
                     _LOGGER.info("Updating blueprint: %s", filename)
 
             if should_copy:
-                shutil.copy2(source_file, target_file)
+                # Run blocking file copy in executor
+                await hass.async_add_executor_job(
+                    shutil.copy2, source_file, target_file
+                )
                 _LOGGER.info("Blueprint installed: %s -> %s", filename, target_file)
 
     except Exception as e:
@@ -827,10 +832,11 @@ class VideoAnalyzer:
                 "Be concise (2-3 sentences)."
             )
         
-        if identified_people:
-            names = [p["name"] for p in identified_people]
-            prompt += f"\n\nIdentified people in frame: {', '.join(names)}"
-        
+        # NOTE: We intentionally do NOT inject facial recognition names into the prompt.
+        # Telling the AI "these people are in frame" causes it to hallucinate/confirm
+        # their presence even when they're not visible. Instead, facial recognition
+        # results are returned separately in the response for the caller to use.
+
         # Send to AI provider (returns description and effective provider used)
         description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt)
 
