@@ -33,11 +33,6 @@ from .const import (
     PROVIDER_BASE_URLS,
     PROVIDER_DEFAULT_MODELS,
     DEFAULT_PROVIDER,
-    # Gaming Mode
-    CONF_GAMING_MODE_ENTITY,
-    CONF_CLOUD_FALLBACK_PROVIDER,
-    DEFAULT_GAMING_MODE_ENTITY,
-    DEFAULT_CLOUD_FALLBACK_PROVIDER,
     # AI Settings
     CONF_VLLM_URL,
     CONF_VLLM_MODEL,
@@ -305,86 +300,20 @@ class VideoAnalyzer:
         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
         self.snapshot_quality = config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)
 
-        # Gaming mode settings
-        self.gaming_mode_entity = config.get(CONF_GAMING_MODE_ENTITY, DEFAULT_GAMING_MODE_ENTITY)
-        self.cloud_fallback_provider = config.get(CONF_CLOUD_FALLBACK_PROVIDER, DEFAULT_CLOUD_FALLBACK_PROVIDER)
-
-        _LOGGER.warning(
+        _LOGGER.info(
             "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp",
             self.provider, len(self.selected_cameras), self.video_width
-        )
-        _LOGGER.warning(
-            "Gaming mode config - Entity: %s, Fallback: %s (NOTE: Only works when default provider is LOCAL)",
-            self.gaming_mode_entity, self.cloud_fallback_provider
         )
         # Log configured providers
         if self.provider_configs:
             configured = [p for p, c in self.provider_configs.items() if c.get("api_key") or p == PROVIDER_LOCAL]
-            _LOGGER.warning("Configured providers: %s", configured)
-
-    def _is_gaming_mode_active(self) -> bool:
-        """Check if gaming mode is active (local AI should be bypassed)."""
-        if not self.gaming_mode_entity:
-            _LOGGER.debug("Gaming mode entity not configured")
-            return False
-
-        state = self.hass.states.get(self.gaming_mode_entity)
-        if state is None:
-            # Entity doesn't exist - gaming mode not configured
-            _LOGGER.warning(
-                "Gaming mode entity '%s' not found - create input_boolean.gaming_mode helper",
-                self.gaming_mode_entity
-            )
-            return False
-
-        is_active = state.state == "on"
-        _LOGGER.warning(
-            "Gaming mode check: entity=%s, state=%s, active=%s",
-            self.gaming_mode_entity, state.state, is_active
-        )
-        return is_active
+            _LOGGER.info("Configured providers: %s", configured)
 
     def _get_effective_provider(self) -> tuple[str, str, str]:
-        """Get the effective provider, considering gaming mode.
+        """Get the effective provider.
 
         Returns: (provider, model, api_key)
         """
-        gaming_active = self._is_gaming_mode_active()
-
-        _LOGGER.warning(
-            "Provider selection - Default: %s, Gaming mode: %s, Fallback: %s",
-            self.provider, gaming_active, self.cloud_fallback_provider
-        )
-
-        # Check if we need to switch from local to cloud
-        if self.provider == PROVIDER_LOCAL and gaming_active:
-            fallback = self.cloud_fallback_provider
-            fallback_config = self.provider_configs.get(fallback, {})
-
-            fallback_model = fallback_config.get("model", PROVIDER_DEFAULT_MODELS.get(fallback, ""))
-            fallback_api_key = fallback_config.get("api_key", "")
-
-            if not fallback_api_key:
-                _LOGGER.error(
-                    "Gaming mode active but fallback provider '%s' has no API key configured! "
-                    "Configure %s in Options first.",
-                    fallback, fallback
-                )
-                # Fall back to local anyway since cloud isn't configured
-                return (self.provider, self.vllm_model, self.api_key)
-
-            _LOGGER.warning(
-                "GAMING MODE ACTIVE - Switching from LOCAL to %s (model: %s)",
-                fallback, fallback_model
-            )
-
-            return (fallback, fallback_model, fallback_api_key)
-
-        # Return current provider settings
-        _LOGGER.warning(
-            "Using default provider: %s, model: %s",
-            self.provider, self.vllm_model
-        )
         return (self.provider, self.vllm_model, self.api_key)
 
     def _normalize_name(self, name: str) -> str:
@@ -784,8 +713,9 @@ class VideoAnalyzer:
         else:
             prompt = (
                 "Describe what you see in this camera feed. "
-                "Focus on: people present, their actions, any notable events. "
-                "Be concise (2-3 sentences)."
+                "Only mention people if you clearly see them - do not assume or guess. "
+                "Note any activity, vehicles, or notable events. "
+                "Be concise (2-3 sentences). Say 'no activity' if nothing notable is happening."
             )
         
         # Send to AI provider (returns description and effective provider used)
@@ -814,9 +744,6 @@ class VideoAnalyzer:
             for word in ["person", "people", "someone", "man", "woman", "child"]
         )
 
-        # Include gaming mode debug info
-        gaming_mode_active = self._is_gaming_mode_active()
-
         return {
             "success": True,
             "camera": entity_id,
@@ -827,8 +754,6 @@ class VideoAnalyzer:
             "snapshot_url": f"/media/local/ha_video_vision/{safe_name}_latest.jpg" if snapshot_path else None,
             "provider_used": provider_used,
             "default_provider": self.provider,
-            "gaming_mode_active": gaming_mode_active,
-            "gaming_mode_entity": self.gaming_mode_entity,
         }
 
     async def _analyze_with_provider(
@@ -838,7 +763,7 @@ class VideoAnalyzer:
 
         Returns: (description, provider_used)
         """
-        # Get effective provider (may switch if gaming mode is active)
+        # Get provider settings
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
 
         media_type = "video" if video_bytes else ("image" if frame_bytes else "none")
@@ -1041,12 +966,12 @@ class VideoAnalyzer:
         """Analyze using local vLLM endpoint."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
-        
+
         try:
             url = f"{self.base_url}/chat/completions"
-            
+
             content = []
-            
+
             if video_bytes:
                 video_b64 = base64.b64encode(video_bytes).decode()
                 content.append({
@@ -1059,12 +984,25 @@ class VideoAnalyzer:
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
                 })
-            
+
             content.append({"type": "text", "text": prompt})
-            
+
+            # System message to prevent hallucination - CRITICAL for accurate responses
+            system_message = (
+                "You are a security camera analyst. Describe ONLY what you can actually see in the video/image. "
+                "NEVER identify or name specific people. NEVER guess identities. "
+                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                "Do not make up names, do not say 'the homeowner', do not assume who anyone is. "
+                "If you don't see any people, say so clearly. Do NOT hallucinate or imagine people who aren't there. "
+                "Be accurate and conservative - only report what is clearly visible."
+            )
+
             payload = {
                 "model": self.vllm_model,
-                "messages": [{"role": "user", "content": content}],
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": content}
+                ],
                 "max_tokens": self.vllm_max_tokens,
                 "temperature": self.vllm_temperature,
             }
