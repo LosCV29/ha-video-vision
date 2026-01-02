@@ -143,7 +143,7 @@ action:
                 {% if result.identified_people and result.identified_people | length > 0 %}
                 {% for person in result.identified_people %}{{ person.name }} ({{ person.confidence }}%){% if not loop.last %}, {% endif %}{% endfor %} -
                 {% endif %}
-                {{ result.description }}
+                {{ result.description if result.description else "Motion detected on camera" }}
 
           # Send to all devices
           - repeat:
