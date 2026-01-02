@@ -83,12 +83,6 @@ from .const import (
     CONF_THERMOSTAT_USE_CELSIUS,
     # Event names
     CONF_FACIAL_RECOGNITION_EVENT,
-    # Gaming mode
-    CONF_GAMING_MODE_ENTITY,
-    CONF_CLOUD_FALLBACK_PROVIDER,
-    CONF_CLOUD_FALLBACK_API_KEY,
-    CONF_CLOUD_FALLBACK_MODEL,
-    LOCAL_PROVIDERS,
     # Defaults
     DEFAULT_USE_NATIVE_INTENTS,
     DEFAULT_EXCLUDED_INTENTS,
@@ -131,11 +125,6 @@ from .const import (
     DEFAULT_THERMOSTAT_TEMP_STEP_CELSIUS,
     # Event defaults
     DEFAULT_FACIAL_RECOGNITION_EVENT,
-    # Gaming mode defaults
-    DEFAULT_GAMING_MODE_ENTITY,
-    DEFAULT_CLOUD_FALLBACK_PROVIDER,
-    DEFAULT_CLOUD_FALLBACK_API_KEY,
-    DEFAULT_CLOUD_FALLBACK_MODEL,
     ALL_NATIVE_INTENTS,
 )
 
@@ -342,7 +331,6 @@ class LMStudioOptionsFlowHandler(config_entries.OptionsFlow):
             menu_options={
                 "connection": "Connection Settings",
                 "model": "Model Settings",
-                "gaming_mode": "Gaming Mode (Cloud Fallback)",
                 "features": "Enable/Disable Features",
                 "entities": "Entity Configuration",
                 "api_keys": "API Keys",
@@ -435,65 +423,6 @@ class LMStudioOptionsFlowHandler(config_entries.OptionsFlow):
                     ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
                 }
             ),
-        )
-
-    async def async_step_gaming_mode(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle gaming mode (cloud fallback) configuration."""
-        if user_input is not None:
-            new_options = {**self._entry.options, **user_input}
-            return self.async_create_entry(title="", data=new_options)
-
-        current = {**self._entry.data, **self._entry.options}
-        current_provider = current.get(CONF_PROVIDER, DEFAULT_PROVIDER)
-
-        # Build cloud provider options (exclude local providers)
-        cloud_providers = [p for p in ALL_PROVIDERS if p not in LOCAL_PROVIDERS]
-        cloud_provider_options = [
-            selector.SelectOptionDict(value=p, label=PROVIDER_NAMES[p])
-            for p in cloud_providers
-        ]
-
-        # Show explanation based on whether current provider is local
-        is_local = current_provider in LOCAL_PROVIDERS
-
-        return self.async_show_form(
-            step_id="gaming_mode",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_GAMING_MODE_ENTITY,
-                        default=current.get(CONF_GAMING_MODE_ENTITY, DEFAULT_GAMING_MODE_ENTITY),
-                    ): selector.EntitySelector(
-                        selector.EntitySelectorConfig(
-                            domain="input_boolean",
-                            multiple=False,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_CLOUD_FALLBACK_PROVIDER,
-                        default=current.get(CONF_CLOUD_FALLBACK_PROVIDER, DEFAULT_CLOUD_FALLBACK_PROVIDER),
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=cloud_provider_options,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_CLOUD_FALLBACK_API_KEY,
-                        default=current.get(CONF_CLOUD_FALLBACK_API_KEY, DEFAULT_CLOUD_FALLBACK_API_KEY),
-                    ): str,
-                    vol.Optional(
-                        CONF_CLOUD_FALLBACK_MODEL,
-                        default=current.get(CONF_CLOUD_FALLBACK_MODEL, DEFAULT_CLOUD_FALLBACK_MODEL),
-                    ): str,
-                }
-            ),
-            description_placeholders={
-                "is_local": "Yes" if is_local else "No",
-                "current_provider": PROVIDER_NAMES.get(current_provider, current_provider),
-            },
         )
 
     async def async_step_features(

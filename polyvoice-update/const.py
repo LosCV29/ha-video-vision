@@ -103,7 +103,6 @@ DEFAULT_TOP_P: Final = 0.95
 # Reasoning effort (for o1/o3 models)
 CONF_REASONING_EFFORT: Final = "reasoning_effort"
 DEFAULT_REASONING_EFFORT: Final = "medium"
-REASONING_EFFORT_OPTIONS: Final = ["low", "medium", "high"]
 
 # OpenAI Responses API (for streaming/realtime)
 CONF_USE_RESPONSES_API: Final = "use_responses_api"
