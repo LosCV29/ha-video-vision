@@ -778,13 +778,22 @@ class VideoAnalyzer:
         # Record video and get frames
         video_bytes, frame_bytes = await self._record_video_and_frames(entity_id, duration)
 
-        # Prepare prompt
+        # Prepare prompt with anti-hallucination instructions embedded
+        # (Free models like Nemotron often ignore system messages)
+        anti_hallucination = (
+            "IMPORTANT: Only describe what you can ACTUALLY see. "
+            "Do NOT identify anyone by name. Do NOT guess who people are. "
+            "If you see a person, just say 'a person' or describe their clothing. "
+            "Never make up names or identities."
+        )
+
         if user_query:
-            prompt = user_query
+            prompt = f"{anti_hallucination}\n\n{user_query}"
         else:
             prompt = (
+                f"{anti_hallucination}\n\n"
                 "Describe what you see in this camera feed. "
-                "Focus on: people present, their actions, any notable events. "
+                "Note any activity, vehicles, or movement. "
                 "Be concise (2-3 sentences)."
             )
         
