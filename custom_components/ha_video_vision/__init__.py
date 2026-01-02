@@ -339,18 +339,18 @@ class VideoAnalyzer:
         self.gaming_mode_entity = config.get(CONF_GAMING_MODE_ENTITY, DEFAULT_GAMING_MODE_ENTITY)
         self.cloud_fallback_provider = config.get(CONF_CLOUD_FALLBACK_PROVIDER, DEFAULT_CLOUD_FALLBACK_PROVIDER)
 
-        _LOGGER.info(
-            "HA Video Vision config updated - Provider: %s, Cameras: %d, Resolution: %dp",
+        _LOGGER.warning(
+            "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp",
             self.provider, len(self.selected_cameras), self.video_width
         )
-        _LOGGER.info(
-            "Gaming mode config - Entity: %s, Fallback: %s (NOTE: Gaming mode only works when default provider is LOCAL)",
+        _LOGGER.warning(
+            "Gaming mode config - Entity: %s, Fallback: %s (NOTE: Only works when default provider is LOCAL)",
             self.gaming_mode_entity, self.cloud_fallback_provider
         )
         # Log configured providers
         if self.provider_configs:
             configured = [p for p, c in self.provider_configs.items() if c.get("api_key") or p == PROVIDER_LOCAL]
-            _LOGGER.info("Configured providers: %s", configured)
+            _LOGGER.warning("Configured providers: %s", configured)
 
     def _is_gaming_mode_active(self) -> bool:
         """Check if gaming mode is active (local AI should be bypassed)."""
@@ -368,7 +368,7 @@ class VideoAnalyzer:
             return False
 
         is_active = state.state == "on"
-        _LOGGER.debug(
+        _LOGGER.warning(
             "Gaming mode check: entity=%s, state=%s, active=%s",
             self.gaming_mode_entity, state.state, is_active
         )
@@ -381,7 +381,7 @@ class VideoAnalyzer:
         """
         gaming_active = self._is_gaming_mode_active()
 
-        _LOGGER.info(
+        _LOGGER.warning(
             "Provider selection - Default: %s, Gaming mode: %s, Fallback: %s",
             self.provider, gaming_active, self.cloud_fallback_provider
         )
@@ -411,7 +411,7 @@ class VideoAnalyzer:
             return (fallback, fallback_model, fallback_api_key)
 
         # Return current provider settings
-        _LOGGER.info(
+        _LOGGER.warning(
             "Using default provider: %s, model: %s",
             self.provider, self.vllm_model
         )
