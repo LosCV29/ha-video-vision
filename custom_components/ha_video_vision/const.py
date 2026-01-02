@@ -47,15 +47,6 @@ PROVIDER_DEFAULT_MODELS: Final = {
 DEFAULT_PROVIDER: Final = PROVIDER_OPENROUTER
 
 # =============================================================================
-# GAMING MODE (Local AI Fallback)
-# =============================================================================
-CONF_GAMING_MODE_ENTITY: Final = "gaming_mode_entity"
-CONF_CLOUD_FALLBACK_PROVIDER: Final = "cloud_fallback_provider"
-
-DEFAULT_GAMING_MODE_ENTITY: Final = "input_boolean.gaming_mode"
-DEFAULT_CLOUD_FALLBACK_PROVIDER: Final = PROVIDER_OPENROUTER
-
-# =============================================================================
 # AI CONFIGURATION
 # =============================================================================
 CONF_VLLM_URL: Final = "vllm_url"

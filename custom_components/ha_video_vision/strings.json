@@ -43,7 +43,6 @@
       "init": {
         "menu_options": {
           "default_provider": "Select Default Provider",
-          "gaming_mode": "Gaming Mode",
           "configure_google": "Configure Google Gemini",
           "configure_openrouter": "Configure OpenRouter",
           "configure_local": "Configure Local vLLM",
@@ -58,14 +57,6 @@
         "description": "Choose which configured provider to use for camera analysis.",
         "data": {
           "default_provider": "Default Provider"
-        }
-      },
-      "gaming_mode": {
-        "title": "Gaming Mode",
-        "description": "When gaming mode is ON and using Local vLLM, requests will use the cloud provider instead. This frees your GPU for gaming.",
-        "data": {
-          "gaming_mode_entity": "Gaming Mode Toggle",
-          "cloud_fallback_provider": "Cloud Fallback Provider"
         }
       },
       "configure_google": {
