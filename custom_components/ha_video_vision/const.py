@@ -69,17 +69,6 @@ DEFAULT_VLLM_MAX_TOKENS: Final = 150
 DEFAULT_VLLM_TEMPERATURE: Final = 0.2  # Lower = more deterministic
 
 # =============================================================================
-# FACIAL RECOGNITION CONFIGURATION
-# =============================================================================
-CONF_FACIAL_REC_URL: Final = "facial_rec_url"
-CONF_FACIAL_REC_ENABLED: Final = "facial_rec_enabled"
-CONF_FACIAL_REC_CONFIDENCE: Final = "facial_rec_confidence"
-
-DEFAULT_FACIAL_REC_URL: Final = "http://localhost:8100"
-DEFAULT_FACIAL_REC_ENABLED: Final = False
-DEFAULT_FACIAL_REC_CONFIDENCE: Final = 50
-
-# =============================================================================
 # CAMERA CONFIGURATION - AUTO-DISCOVERY
 # =============================================================================
 # Selected camera entity IDs from auto-discovery
@@ -128,7 +117,6 @@ DEFAULT_SNAPSHOT_QUALITY: Final = 85  # JPEG quality 1-100
 # =============================================================================
 SERVICE_ANALYZE_CAMERA: Final = "analyze_camera"
 SERVICE_RECORD_CLIP: Final = "record_clip"
-SERVICE_IDENTIFY_FACES: Final = "identify_faces"
 
 # =============================================================================
 # ATTRIBUTES
@@ -137,5 +125,4 @@ ATTR_CAMERA: Final = "camera"
 ATTR_DURATION: Final = "duration"
 ATTR_USER_QUERY: Final = "user_query"
 ATTR_NOTIFY: Final = "notify"
-ATTR_IMAGE_PATH: Final = "image_path"
 ATTR_PROVIDER: Final = "provider"
