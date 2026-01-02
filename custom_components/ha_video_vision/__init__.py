@@ -785,8 +785,10 @@ class VideoAnalyzer:
             except Exception as e:
                 _LOGGER.error("Failed to save snapshot: %s", e)
 
+        # Safely check for person-related words in description
+        description_text = description or ""
         person_detected = bool(identified_people) or any(
-            word in description.lower()
+            word in description_text.lower()
             for word in ["person", "people", "someone", "man", "woman", "child"]
         )
 
@@ -974,7 +976,17 @@ class VideoAnalyzer:
                 async with self._session.post(url, json=payload, headers=headers) as response:
                     if response.status == 200:
                         result = await response.json()
-                        return result["choices"][0]["message"]["content"]
+                        # Safely extract content from response
+                        choices = result.get("choices", [])
+                        if not choices:
+                            _LOGGER.warning("OpenRouter returned empty choices: %s", result)
+                            return "No response from AI (empty choices)"
+                        message = choices[0].get("message", {})
+                        content = message.get("content", "")
+                        if not content:
+                            _LOGGER.warning("OpenRouter returned empty content")
+                            return "No description available from AI"
+                        return content
                     else:
                         error = await response.text()
                         _LOGGER.error("OpenRouter error: %s", error[:500])
@@ -1020,7 +1032,17 @@ class VideoAnalyzer:
                 async with self._session.post(url, json=payload) as response:
                     if response.status == 200:
                         result = await response.json()
-                        return result["choices"][0]["message"]["content"]
+                        # Safely extract content from response
+                        choices = result.get("choices", [])
+                        if not choices:
+                            _LOGGER.warning("Local vLLM returned empty choices: %s", result)
+                            return "No response from AI (empty choices)"
+                        message = choices[0].get("message", {})
+                        content = message.get("content", "")
+                        if not content:
+                            _LOGGER.warning("Local vLLM returned empty content")
+                            return "No description available from AI"
+                        return content
                     else:
                         error = await response.text()
                         _LOGGER.error("Local vLLM error: %s", error[:500])
