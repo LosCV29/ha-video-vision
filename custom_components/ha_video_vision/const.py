@@ -18,25 +18,30 @@ CONF_DEFAULT_PROVIDER: Final = "default_provider"
 # Provider choices - VIDEO ONLY (no image-only providers)
 PROVIDER_LOCAL: Final = "local"
 PROVIDER_GOOGLE: Final = "google"
+PROVIDER_OPENROUTER: Final = "openrouter"
 
 ALL_PROVIDERS: Final = [
     PROVIDER_LOCAL,
     PROVIDER_GOOGLE,
+    PROVIDER_OPENROUTER,
 ]
 
 PROVIDER_NAMES: Final = {
     PROVIDER_LOCAL: "Local vLLM (Video-Capable)",
     PROVIDER_GOOGLE: "Google Gemini (FREE - Video Support)",
+    PROVIDER_OPENROUTER: "OpenRouter (Paid models with video)",
 }
 
 PROVIDER_BASE_URLS: Final = {
     PROVIDER_LOCAL: "http://localhost:1234/v1",
     PROVIDER_GOOGLE: "https://generativelanguage.googleapis.com/v1beta",
+    PROVIDER_OPENROUTER: "https://openrouter.ai/api/v1",
 }
 
 PROVIDER_DEFAULT_MODELS: Final = {
     PROVIDER_LOCAL: "local-model",
     PROVIDER_GOOGLE: "gemini-2.0-flash",
+    PROVIDER_OPENROUTER: "google/gemini-2.0-flash-001",
 }
 
 DEFAULT_PROVIDER: Final = PROVIDER_GOOGLE
