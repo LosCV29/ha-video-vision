@@ -384,11 +384,35 @@ When you say "check the garage camera", the system:
 
 | Version | Changes |
 |---------|---------|
+| **4.2.0** | Fix LLM hallucinations in local vLLM provider, add model selector dropdown |
 | **4.1.0** | Bundled blueprints - auto-install Camera Alert blueprint |
 | **4.0.0** | Auto-discovery, voice aliases, multi-provider config storage |
 | **3.0.0** | Video-only providers, OpenRouter default, simplified config |
 | **2.0.0** | Multi-provider, facial recognition |
 | **1.0.0** | Initial release |
+
+---
+
+## 🔄 How Updates Work (HACS)
+
+HA Video Vision is distributed through [HACS](https://hacs.xyz/) (Home Assistant Community Store).
+
+**To check for updates:**
+1. Open HACS → Integrations
+2. Find "HA Video Vision"
+3. If an update is available, you'll see an "Update" button
+
+**Important notes:**
+- **Updates are based on GitHub releases**, not individual commits
+- New releases are tagged by the maintainer when features are stable
+- If you're on the latest version and no update shows, you already have the newest release
+- To check your current version: Settings → Devices & Services → HA Video Vision → Configure
+
+**Want bleeding-edge features?**
+You can manually update to the latest code from the main branch:
+1. HACS → Integrations → HA Video Vision → ⋮ (menu) → Redownload
+2. Enable "Show beta versions" if available
+3. Restart Home Assistant
 
 ---
 
