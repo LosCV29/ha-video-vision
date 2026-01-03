@@ -788,9 +788,10 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
         model: str = None, api_key: str = None
     ) -> str:
-        """Analyze using Google Gemini."""
-        if not video_bytes and not frame_bytes:
-            return "No video or image available for analysis"
+        """Analyze using Google Gemini - VIDEO ONLY."""
+        # VIDEO ONLY - This integration focuses on video analysis, not images
+        if not video_bytes:
+            return "No video available for analysis. This integration requires video input."
 
         # Use provided overrides or fall back to config
         model = model or self.vllm_model
@@ -798,25 +799,17 @@ class VideoAnalyzer:
 
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            
+
             parts = [{"text": prompt}]
-            
-            if video_bytes:
-                video_b64 = base64.b64encode(video_bytes).decode()
-                parts.insert(0, {
-                    "inline_data": {
-                        "mime_type": "video/mp4",
-                        "data": video_b64
-                    }
-                })
-            elif frame_bytes:
-                image_b64 = base64.b64encode(frame_bytes).decode()
-                parts.insert(0, {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": image_b64
-                    }
-                })
+
+            # VIDEO ONLY - no image fallback
+            video_b64 = base64.b64encode(video_bytes).decode()
+            parts.insert(0, {
+                "inline_data": {
+                    "mime_type": "video/mp4",
+                    "data": video_b64
+                }
+            })
             
             # System instruction to prevent hallucination of identities
             system_instruction = (
@@ -884,13 +877,23 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
         model: str = None, api_key: str = None
     ) -> str:
-        """Analyze using OpenRouter with video support."""
-        if not video_bytes and not frame_bytes:
-            return "No video or image available for analysis"
+        """Analyze using OpenRouter with VIDEO ONLY support."""
+        # VIDEO ONLY - This integration focuses on video analysis, not images
+        if not video_bytes:
+            return "No video available for analysis. This integration requires video input."
 
         # Use provided overrides or fall back to config
         model = model or self.vllm_model
         api_key = api_key or self.api_key
+
+        # Warn about free models not supporting video
+        is_free_model = model and ":free" in model.lower()
+        if is_free_model:
+            _LOGGER.warning(
+                "Free models on OpenRouter (%s) do NOT support video input. "
+                "Use Google Gemini (free tier) for video analysis instead.",
+                model
+            )
 
         try:
             url = "https://openrouter.ai/api/v1/chat/completions"
@@ -901,22 +904,14 @@ class VideoAnalyzer:
 
             content = []
 
-            if video_bytes:
-                video_b64 = base64.b64encode(video_bytes).decode()
-                content.append({
-                    "type": "video_url",
-                    "video_url": {
-                        "url": f"data:video/mp4;base64,{video_b64}"
-                    }
-                })
-            elif frame_bytes:
-                image_b64 = base64.b64encode(frame_bytes).decode()
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_b64}"
-                    }
-                })
+            # VIDEO ONLY - no image fallback
+            video_b64 = base64.b64encode(video_bytes).decode()
+            content.append({
+                "type": "video_url",
+                "video_url": {
+                    "url": f"data:video/mp4;base64,{video_b64}"
+                }
+            })
 
             content.append({"type": "text", "text": prompt})
 

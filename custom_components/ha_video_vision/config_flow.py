@@ -53,11 +53,6 @@ from .const import (
     CONF_SNAPSHOT_QUALITY,
     DEFAULT_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_QUALITY,
-    # Gaming mode
-    CONF_GAMING_MODE_ENTITY,
-    CONF_CLOUD_FALLBACK_PROVIDER,
-    DEFAULT_GAMING_MODE_ENTITY,
-    DEFAULT_CLOUD_FALLBACK_PROVIDER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,7 +88,7 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required(CONF_PROVIDER, default=PROVIDER_OPENROUTER): selector.SelectSelector(
+                vol.Required(CONF_PROVIDER, default=DEFAULT_PROVIDER): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=provider_options,
                         mode=selector.SelectSelectorMode.DROPDOWN,
@@ -107,7 +102,7 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle credentials step based on provider."""
         errors = {}
-        provider = self._data.get(CONF_PROVIDER, PROVIDER_OPENROUTER)
+        provider = self._data.get(CONF_PROVIDER, DEFAULT_PROVIDER)
 
         if user_input is not None:
             # Test connection and fetch models
@@ -142,7 +137,7 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Select model from available models."""
-        provider = self._data.get(CONF_PROVIDER, PROVIDER_OPENROUTER)
+        provider = self._data.get(CONF_PROVIDER, DEFAULT_PROVIDER)
         models = self._data.get("_available_models", [])
 
         if user_input is not None:
@@ -201,21 +196,34 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return []
 
     def _parse_models(self, provider: str, data: dict) -> list[dict]:
-        """Parse models response based on provider."""
+        """Parse models response based on provider - VIDEO CAPABLE ONLY."""
         models = []
         if provider == PROVIDER_GOOGLE:
             for model in data.get("models", []):
                 name = model.get("name", "")
-                # Filter for vision-capable models
-                if "vision" in name.lower() or "gemini" in name.lower():
+                # Gemini models support video - filter for gemini-2.0 and gemini-1.5
+                if any(x in name.lower() for x in ["gemini-2.0", "gemini-1.5", "gemini-exp"]):
                     model_id = name.replace("models/", "")
                     display_name = model.get("displayName", model_id)
                     models.append({"id": model_id, "name": display_name})
         elif provider == PROVIDER_OPENROUTER:
             for model in data.get("data", []):
                 model_id = model.get("id", "")
-                # Filter for vision/multimodal models
-                if any(x in model_id.lower() for x in ["vision", "vl", "multimodal", "gemini", "gpt-4o", "claude"]):
+                # Check modalities for video support
+                modalities = model.get("modalities", [])
+                architecture = model.get("architecture", {})
+                input_modalities = architecture.get("input_modalities", [])
+
+                supports_video = (
+                    "video" in modalities or
+                    "video" in input_modalities or
+                    any(x in model_id.lower() for x in [
+                        "gemini-2.0", "gemini-1.5", "gemini-exp", "gpt-4o",
+                    ])
+                )
+                is_free = ":free" in model_id.lower()
+
+                if supports_video and not is_free:
                     name = model.get("name", model_id)
                     models.append({"id": model_id, "name": name})
         elif provider == PROVIDER_LOCAL:
@@ -320,7 +328,6 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             menu_options={
                 "default_provider": "Select Default Provider",
-                "gaming_mode": "Gaming Mode",
                 "configure_google": "Configure Google Gemini",
                 "configure_openrouter": "Configure OpenRouter",
                 "configure_local": "Configure Local vLLM",
@@ -376,65 +383,6 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                     )
                 ),
             }),
-        )
-
-    # ==================== GAMING MODE ====================
-    async def async_step_gaming_mode(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Configure gaming mode (cloud fallback) settings."""
-        current = {**self._entry.data, **self._entry.options}
-        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
-
-        if user_input is not None:
-            new_options = {**self._entry.options, **user_input}
-            return self.async_create_entry(title="", data=new_options)
-
-        # Build cloud provider options (only show configured cloud providers)
-        cloud_provider_options = []
-        for provider_key in [PROVIDER_GOOGLE, PROVIDER_OPENROUTER]:
-            if provider_key in provider_configs:
-                config = provider_configs[provider_key]
-                if config.get("api_key"):
-                    cloud_provider_options.append(
-                        selector.SelectOptionDict(
-                            value=provider_key,
-                            label=PROVIDER_NAMES[provider_key]
-                        )
-                    )
-
-        # If no cloud providers configured, show all options
-        if not cloud_provider_options:
-            cloud_provider_options = [
-                selector.SelectOptionDict(value=PROVIDER_GOOGLE, label=PROVIDER_NAMES[PROVIDER_GOOGLE]),
-                selector.SelectOptionDict(value=PROVIDER_OPENROUTER, label=PROVIDER_NAMES[PROVIDER_OPENROUTER]),
-            ]
-
-        return self.async_show_form(
-            step_id="gaming_mode",
-            data_schema=vol.Schema({
-                vol.Optional(
-                    CONF_GAMING_MODE_ENTITY,
-                    default=current.get(CONF_GAMING_MODE_ENTITY, DEFAULT_GAMING_MODE_ENTITY),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="input_boolean",
-                        multiple=False,
-                    )
-                ),
-                vol.Optional(
-                    CONF_CLOUD_FALLBACK_PROVIDER,
-                    default=current.get(CONF_CLOUD_FALLBACK_PROVIDER, DEFAULT_CLOUD_FALLBACK_PROVIDER),
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=cloud_provider_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-            }),
-            description_placeholders={
-                "hint": "When gaming mode is ON and using Local vLLM, requests will use the cloud provider instead.",
-            },
         )
 
     # ==================== GOOGLE GEMINI ====================
@@ -681,24 +629,48 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             return []
 
     def _parse_models(self, provider: str, data: dict) -> list[dict]:
-        """Parse models response based on provider."""
+        """Parse models response based on provider - VIDEO CAPABLE ONLY."""
         models = []
         if provider == PROVIDER_GOOGLE:
             for model in data.get("models", []):
                 name = model.get("name", "")
-                # Filter for vision-capable models
-                if "vision" in name.lower() or "gemini" in name.lower():
+                # Gemini models support video - filter for gemini-2.0 and gemini-1.5
+                # These are confirmed to support video input
+                if any(x in name.lower() for x in ["gemini-2.0", "gemini-1.5", "gemini-exp"]):
                     model_id = name.replace("models/", "")
                     display_name = model.get("displayName", model_id)
                     models.append({"id": model_id, "name": display_name})
         elif provider == PROVIDER_OPENROUTER:
             for model in data.get("data", []):
                 model_id = model.get("id", "")
-                # Filter for vision/multimodal models
-                if any(x in model_id.lower() for x in ["vision", "vl", "multimodal", "gemini", "gpt-4o", "claude", "llava", "pixtral"]):
+                # Check modalities for video support - OpenRouter provides this info
+                modalities = model.get("modalities", [])
+                architecture = model.get("architecture", {})
+                input_modalities = architecture.get("input_modalities", [])
+
+                # Only include models that explicitly support video input
+                # Check both top-level modalities and architecture.input_modalities
+                supports_video = (
+                    "video" in modalities or
+                    "video" in input_modalities or
+                    # Known video-capable model families (paid versions)
+                    any(x in model_id.lower() for x in [
+                        "gemini-2.0", "gemini-1.5", "gemini-exp",  # Google Gemini
+                        "gpt-4o",  # OpenAI GPT-4o (not mini)
+                    ])
+                )
+
+                # Exclude free models - they don't support video
+                is_free = ":free" in model_id.lower()
+
+                if supports_video and not is_free:
                     name = model.get("name", model_id)
-                    models.append({"id": model_id, "name": name})
+                    # Add pricing info if available
+                    pricing = model.get("pricing", {})
+                    prompt_price = pricing.get("prompt", "0")
+                    models.append({"id": model_id, "name": f"{name}"})
         elif provider == PROVIDER_LOCAL:
+            # Local models - show all, user knows their setup
             for model in data.get("data", []):
                 model_id = model.get("id", "")
                 models.append({"id": model_id, "name": model_id})
