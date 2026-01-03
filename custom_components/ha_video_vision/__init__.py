@@ -57,6 +57,11 @@ from .const import (
     CONF_SNAPSHOT_QUALITY,
     DEFAULT_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_QUALITY,
+    # Facial Recognition
+    CONF_FACIAL_REC_ENABLED,
+    CONF_FACIAL_REC_URL,
+    DEFAULT_FACIAL_REC_ENABLED,
+    DEFAULT_FACIAL_REC_URL,
     # Services
     SERVICE_ANALYZE_CAMERA,
     SERVICE_RECORD_CLIP,
@@ -64,6 +69,7 @@ from .const import (
     ATTR_CAMERA,
     ATTR_DURATION,
     ATTR_USER_QUERY,
+    ATTR_FACIAL_RECOGNITION,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -134,6 +140,7 @@ SERVICE_ANALYZE_SCHEMA = vol.Schema(
         vol.Required(ATTR_CAMERA): cv.string,
         vol.Optional(ATTR_DURATION, default=3): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
         vol.Optional(ATTR_USER_QUERY, default=""): cv.string,
+        vol.Optional(ATTR_FACIAL_RECOGNITION, default=False): cv.boolean,
     }
 )
 
@@ -197,8 +204,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         camera = call.data[ATTR_CAMERA]
         duration = call.data.get(ATTR_DURATION, 3)
         user_query = call.data.get(ATTR_USER_QUERY, "")
+        facial_recognition = call.data.get(ATTR_FACIAL_RECOGNITION, False)
 
-        return await analyzer.analyze_camera(camera, duration, user_query)
+        return await analyzer.analyze_camera(camera, duration, user_query, facial_recognition)
 
     async def handle_record_clip(call: ServiceCall) -> dict[str, Any]:
         """Handle record_clip service call."""
@@ -299,6 +307,10 @@ class VideoAnalyzer:
         # Snapshot settings
         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
         self.snapshot_quality = config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)
+
+        # Facial recognition settings
+        self.facial_rec_enabled = config.get(CONF_FACIAL_REC_ENABLED, DEFAULT_FACIAL_REC_ENABLED)
+        self.facial_rec_url = config.get(CONF_FACIAL_REC_URL, DEFAULT_FACIAL_REC_URL)
 
         _LOGGER.info(
             "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp",
@@ -682,14 +694,15 @@ class VideoAnalyzer:
                         pass
 
     async def analyze_camera(
-        self, camera_input: str, duration: int = None, user_query: str = ""
+        self, camera_input: str, duration: int = None, user_query: str = "",
+        facial_recognition: bool = False
     ) -> dict[str, Any]:
         """Analyze camera using video and AI vision."""
         duration = duration or self.video_duration
 
         _LOGGER.warning(
-            "Camera analysis requested - Input: '%s', Provider: %s, Model: %s",
-            camera_input, self.provider, self.vllm_model
+            "Camera analysis requested - Input: '%s', Provider: %s, Model: %s, FacialRec: %s",
+            camera_input, self.provider, self.vllm_model, facial_recognition
         )
 
         entity_id = self._find_camera_entity(camera_input)
@@ -744,12 +757,20 @@ class VideoAnalyzer:
             for word in ["person", "people", "someone", "man", "woman", "child"]
         )
 
+        # Facial recognition - ONLY when explicitly requested (from blueprint automations)
+        identified_faces = []
+        if facial_recognition and self.facial_rec_enabled and frame_bytes:
+            identified_faces = await self._identify_faces(frame_bytes)
+            if identified_faces:
+                _LOGGER.info("Facial recognition identified: %s", identified_faces)
+
         return {
             "success": True,
             "camera": entity_id,
             "friendly_name": friendly_name,
             "description": description,
             "person_detected": person_detected,
+            "identified_faces": identified_faces,
             "snapshot_path": snapshot_path,
             "snapshot_url": f"/media/local/ha_video_vision/{safe_name}_latest.jpg" if snapshot_path else None,
             "provider_used": provider_used,
@@ -1006,7 +1027,7 @@ class VideoAnalyzer:
                 "max_tokens": self.vllm_max_tokens,
                 "temperature": self.vllm_temperature,
             }
-            
+
             async with asyncio.timeout(120):
                 async with self._session.post(url, json=payload) as response:
                     if response.status == 200:
@@ -1026,7 +1047,47 @@ class VideoAnalyzer:
                         error = await response.text()
                         _LOGGER.error("Local vLLM error: %s", error[:500])
                         return f"Analysis failed: {response.status}"
-                        
+
         except Exception as e:
             _LOGGER.error("Local vLLM error: %s", e)
             return f"Analysis error: {str(e)}"
+
+    async def _identify_faces(self, frame_bytes: bytes) -> list[str]:
+        """Identify faces using the facial recognition addon.
+
+        Returns list of identified person names.
+        """
+        if not self.facial_rec_enabled or not self.facial_rec_url:
+            return []
+
+        try:
+            image_b64 = base64.b64encode(frame_bytes).decode()
+
+            url = f"{self.facial_rec_url}/identify"
+            payload = {"image": image_b64}
+
+            async with asyncio.timeout(10):
+                async with self._session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        # Extract identified names from response
+                        faces = result.get("faces", [])
+                        identified = []
+                        for face in faces:
+                            name = face.get("name", "")
+                            if name and name.lower() != "unknown":
+                                identified.append(name)
+                        return identified
+                    else:
+                        _LOGGER.warning(
+                            "Facial recognition error: %s",
+                            await response.text()
+                        )
+                        return []
+
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Facial recognition request timed out")
+            return []
+        except Exception as e:
+            _LOGGER.warning("Facial recognition error: %s", e)
+            return []

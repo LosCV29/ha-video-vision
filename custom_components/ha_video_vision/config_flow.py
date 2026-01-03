@@ -53,6 +53,11 @@ from .const import (
     CONF_SNAPSHOT_QUALITY,
     DEFAULT_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_QUALITY,
+    # Facial Recognition
+    CONF_FACIAL_REC_ENABLED,
+    CONF_FACIAL_REC_URL,
+    DEFAULT_FACIAL_REC_ENABLED,
+    DEFAULT_FACIAL_REC_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -330,6 +335,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 "voice_aliases": "Voice Aliases",
                 "video_quality": "Video Quality",
                 "ai_settings": "AI Settings",
+                "facial_recognition": "Facial Recognition",
             },
         )
 
@@ -797,4 +803,45 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={
                 "temp_hint": "Lower = more consistent/factual. Higher = more creative.",
             },
+        )
+
+    async def async_step_facial_recognition(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle facial recognition settings."""
+        errors = {}
+        current = {**self._entry.data, **self._entry.options}
+
+        if user_input is not None:
+            # If enabled, test connection to facial recognition addon
+            if user_input.get(CONF_FACIAL_REC_ENABLED, False):
+                url = user_input.get(CONF_FACIAL_REC_URL, DEFAULT_FACIAL_REC_URL)
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            f"{url}/status",
+                            timeout=aiohttp.ClientTimeout(total=5)
+                        ) as response:
+                            if response.status != 200:
+                                errors["base"] = "facial_rec_not_available"
+                except Exception:
+                    errors["base"] = "facial_rec_not_available"
+
+            if not errors:
+                new_options = {**self._entry.options, **user_input}
+                return self.async_create_entry(title="", data=new_options)
+
+        return self.async_show_form(
+            step_id="facial_recognition",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_FACIAL_REC_ENABLED,
+                    default=current.get(CONF_FACIAL_REC_ENABLED, DEFAULT_FACIAL_REC_ENABLED)
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_FACIAL_REC_URL,
+                    default=current.get(CONF_FACIAL_REC_URL, DEFAULT_FACIAL_REC_URL)
+                ): str,
+            }),
+            errors=errors,
         )

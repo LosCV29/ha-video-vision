@@ -104,6 +104,15 @@ DEFAULT_SNAPSHOT_DIR: Final = "/media/ha_video_vision"
 DEFAULT_SNAPSHOT_QUALITY: Final = 85  # JPEG quality 1-100
 
 # =============================================================================
+# FACIAL RECOGNITION (Optional - requires ha-addons/facial-recognition)
+# =============================================================================
+CONF_FACIAL_REC_ENABLED: Final = "facial_rec_enabled"
+CONF_FACIAL_REC_URL: Final = "facial_rec_url"
+
+DEFAULT_FACIAL_REC_ENABLED: Final = False
+DEFAULT_FACIAL_REC_URL: Final = "http://localhost:8100"
+
+# =============================================================================
 # SERVICE NAMES
 # =============================================================================
 SERVICE_ANALYZE_CAMERA: Final = "analyze_camera"
@@ -117,3 +126,4 @@ ATTR_DURATION: Final = "duration"
 ATTR_USER_QUERY: Final = "user_query"
 ATTR_NOTIFY: Final = "notify"
 ATTR_PROVIDER: Final = "provider"
+ATTR_FACIAL_RECOGNITION: Final = "facial_recognition"

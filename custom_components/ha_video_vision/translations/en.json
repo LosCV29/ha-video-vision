@@ -49,7 +49,8 @@
           "cameras": "Select Cameras",
           "voice_aliases": "Voice Aliases",
           "video_quality": "Video Quality",
-          "ai_settings": "AI Settings"
+          "ai_settings": "AI Settings",
+          "facial_recognition": "Facial Recognition"
         }
       },
       "default_provider": {
@@ -132,7 +133,18 @@
           "vllm_max_tokens": "Max Response Length (tokens)",
           "vllm_temperature": "Temperature (creativity)"
         }
+      },
+      "facial_recognition": {
+        "title": "Facial Recognition",
+        "description": "Enable facial recognition for automation alerts. Requires the Facial Recognition addon from ha-addons. Faces are read from /homeassistant/camera_faces.",
+        "data": {
+          "facial_rec_enabled": "Enable Facial Recognition",
+          "facial_rec_url": "Addon URL"
+        }
       }
+    },
+    "error": {
+      "facial_rec_not_available": "Cannot connect to Facial Recognition addon. Make sure it's installed and running."
     },
     "abort": {
       "no_providers_configured": "No providers configured. Use the provider configuration options first."

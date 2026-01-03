@@ -83,11 +83,12 @@ action:
   - delay:
       seconds: 1
   
-  # Analyze camera
+  # Analyze camera (facial_recognition enabled for automations)
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
       duration: 3
+      facial_recognition: true
     response_variable: result
   
   # Send notifications if successful
@@ -99,7 +100,11 @@ action:
           - variables:
               tag: "ha_video_vision_{{ camera_input }}"
               notification_title: "{{ result.friendly_name }}"
-              notification_message: "{{ result.description if result.description else 'Motion detected on camera' }}"
+              faces_text: >
+                {% if result.identified_faces and result.identified_faces | length > 0 %}
+                  [{{ result.identified_faces | join(', ') }}]
+                {% endif %}
+              notification_message: "{{ faces_text ~ ' ' if faces_text else '' }}{{ result.description if result.description else 'Motion detected on camera' }}"
           
           # Send to all devices - same format as LLM Vision blueprint
           - repeat:
