@@ -931,6 +931,11 @@ class VideoAnalyzer:
                 ],
                 "max_tokens": self.vllm_max_tokens,
                 "temperature": self.vllm_temperature,
+                # Force routing through Google Vertex for base64 video support
+                # AI Studio only supports YouTube links, Vertex supports base64
+                "provider": {
+                    "only": ["Google Vertex"]
+                }
             }
             
             async with asyncio.timeout(60):
