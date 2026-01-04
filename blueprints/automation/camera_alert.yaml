@@ -2,10 +2,13 @@ blueprint:
   name: "HA Video Vision - Camera Alert"
   description: >
     When person is detected, record video, run AI analysis,
-    and send mobile notifications with snapshot. Works with iOS and Android via Nabu Casa.
+    and send mobile notifications with snapshot. Optionally identify
+    known faces using the Facial Recognition add-on.
+    Works with iOS and Android via Nabu Casa.
   domain: automation
   author: "HA Video Vision Integration"
-  
+  source_url: "https://github.com/LosCV29/ha-video-vision/blob/main/custom_components/ha_video_vision/blueprints/automation/camera_alert.yaml"
+
   input:
     person_sensor:
       name: "Person Sensor"
@@ -13,13 +16,13 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
-    
+
     camera_name:
       name: "Camera Name"
       description: "Camera name as configured in HA Video Vision (e.g., 'porch', 'driveway')"
       selector:
         text:
-    
+
     notify_devices:
       name: "Notify Devices"
       description: "Select mobile devices to notify (iOS and Android)"
@@ -29,7 +32,29 @@ blueprint:
           multiple: true
           filter:
             integration: mobile_app
-    
+
+    notify_start:
+      name: "Notify After"
+      description: "Only send notifications after this time (leave default for always)"
+      default: "00:00:00"
+      selector:
+        time:
+
+    notify_end:
+      name: "Notify Before"
+      description: "Only send notifications before this time (leave default for always)"
+      default: "23:59:59"
+      selector:
+        time:
+
+    custom_prompt:
+      name: "Custom Prompt (Optional)"
+      description: "Override the AI prompt. Leave empty for default factual description."
+      default: ""
+      selector:
+        text:
+          multiline: true
+
     cooldown:
       name: "Cooldown (minutes)"
       description: "Wait time between notifications for this camera"
@@ -40,17 +65,36 @@ blueprint:
           step: 1
           unit_of_measurement: "min"
       default: 2
-    
+
     tap_navigate:
       name: "Tap Navigate"
       description: "Dashboard to open when notification is tapped"
       default: "/lovelace/0"
       selector:
         text:
-    
+
     critical_alert:
       name: "Critical Alert (iOS)"
       description: "Bypass Do Not Disturb on iOS devices"
+      default: false
+      selector:
+        boolean:
+
+    capture_delay:
+      name: "Capture Delay (seconds)"
+      description: "Wait time before capturing. Increase for cloud cameras (Ring, Nest) that need time to process new video. Default 1s works for local cameras, use 3-5s for cloud cameras."
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          unit_of_measurement: "s"
+
+    # Facial Recognition
+    facial_recognition_enabled:
+      name: "Enable Facial Recognition"
+      description: "Identify known faces using the Facial Recognition add-on. Configure the server URL in the integration settings."
       default: false
       selector:
         boolean:
@@ -63,7 +107,14 @@ variables:
   critical: !input critical_alert
   tap_nav: !input tap_navigate
   camera_input: !input camera_name
-  # Build service names from device IDs (same method as LLM Vision)
+  user_prompt: !input custom_prompt
+  time_start: !input notify_start
+  time_end: !input notify_end
+  delay_seconds: !input capture_delay
+  face_rec_enabled: !input facial_recognition_enabled
+  # Default prompt - factual and deterministic
+  default_prompt: "Briefly describe what you see. Only state what is clearly visible. Do not speculate. If a person is visible, describe their appearance and actions. 2-3 sentences max."
+  # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}
     {% for device_id in notify_devices %}
@@ -78,30 +129,60 @@ trigger:
     entity_id: !input person_sensor
     to: "on"
 
+condition:
+  # Check if current time is within notification window
+  - condition: time
+    after: !input notify_start
+    before: !input notify_end
+
 action:
-  # Wait for camera to capture
+  # Wait for camera to capture (increase for cloud cameras like Ring/Nest)
   - delay:
-      seconds: 1
-  
-  # Analyze camera
+      seconds: "{{ delay_seconds }}"
+
+  # Analyze camera with prompt
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
       duration: 3
+      user_query: "{{ user_prompt if user_prompt else default_prompt }}"
     response_variable: result
-  
+
   # Send notifications if successful
   - choose:
       - conditions:
           - condition: template
             value_template: "{{ result.success == true }}"
         sequence:
+          # Facial recognition (if enabled and snapshot available)
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ face_rec_enabled and result.snapshot_path }}"
+                sequence:
+                  - service: ha_video_vision.identify_faces
+                    data:
+                      image_path: "{{ result.snapshot_path }}"
+                    response_variable: face_result
+            default:
+              - variables:
+                  face_result:
+                    success: false
+                    summary: ""
+
           - variables:
               tag: "ha_video_vision_{{ camera_input }}"
               notification_title: "{{ result.friendly_name }}"
-              notification_message: "{{ result.description if result.description else 'Motion detected on camera' }}"
-          
-          # Send to all devices - same format as LLM Vision blueprint
+              # Include facial recognition results in message if available
+              notification_message: >
+                {% set desc = result.description if result.description else 'Motion detected on camera' %}
+                {% if face_rec_enabled and face_result.success and face_result.summary and face_result.summary != 'No known faces' %}
+                  {{ face_result.summary }} - {{ desc }}
+                {% else %}
+                  {{ desc }}
+                {% endif %}
+
+          # Send to all devices
           - repeat:
               for_each: "{{ device_services }}"
               sequence:
@@ -140,7 +221,7 @@ action:
         data:
           message: "HA Video Vision failed for {{ camera_input }}: {{ result.error }}"
           level: warning
-  
+
   # Cooldown
   - delay:
       minutes: !input cooldown
