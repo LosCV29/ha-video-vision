@@ -53,6 +53,13 @@ from .const import (
     CONF_SNAPSHOT_QUALITY,
     DEFAULT_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_QUALITY,
+    # Facial Recognition
+    CONF_FACIAL_RECOGNITION_URL,
+    CONF_FACIAL_RECOGNITION_ENABLED,
+    CONF_FACIAL_RECOGNITION_CONFIDENCE,
+    DEFAULT_FACIAL_RECOGNITION_URL,
+    DEFAULT_FACIAL_RECOGNITION_ENABLED,
+    DEFAULT_FACIAL_RECOGNITION_CONFIDENCE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -330,6 +337,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 "voice_aliases": "Voice Aliases",
                 "video_quality": "Video Quality",
                 "ai_settings": "AI Settings",
+                "facial_recognition": "Facial Recognition",
             },
         )
 
@@ -796,5 +804,60 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             }),
             description_placeholders={
                 "temp_hint": "Lower = more consistent/factual. Higher = more creative.",
+            },
+        )
+
+    async def async_step_facial_recognition(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle facial recognition settings."""
+        errors = {}
+
+        if user_input is not None:
+            # Validate URL if enabled
+            if user_input.get(CONF_FACIAL_RECOGNITION_ENABLED, False):
+                url = user_input.get(CONF_FACIAL_RECOGNITION_URL, "").strip()
+                if url:
+                    # Test connection to facial recognition server
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                f"{url.rstrip('/')}/status",
+                                timeout=aiohttp.ClientTimeout(total=5)
+                            ) as response:
+                                if response.status != 200:
+                                    errors["base"] = "cannot_connect"
+                    except Exception:
+                        errors["base"] = "cannot_connect"
+
+            if not errors:
+                new_options = {**self._entry.options, **user_input}
+                return self.async_create_entry(title="", data=new_options)
+
+        current = {**self._entry.data, **self._entry.options}
+
+        return self.async_show_form(
+            step_id="facial_recognition",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_FACIAL_RECOGNITION_ENABLED,
+                    default=current.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_FACIAL_RECOGNITION_URL,
+                    default=current.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
+                ),
+                vol.Required(
+                    CONF_FACIAL_RECOGNITION_CONFIDENCE,
+                    default=current.get(CONF_FACIAL_RECOGNITION_CONFIDENCE, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER)
+                ),
+            }),
+            errors=errors,
+            description_placeholders={
+                "url_hint": "URL of Facial Recognition add-on (e.g., http://localhost:8100)",
             },
         )

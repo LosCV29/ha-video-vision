@@ -104,6 +104,17 @@ DEFAULT_SNAPSHOT_DIR: Final = "/media/ha_video_vision"
 DEFAULT_SNAPSHOT_QUALITY: Final = 85  # JPEG quality 1-100
 
 # =============================================================================
+# FACIAL RECOGNITION
+# =============================================================================
+CONF_FACIAL_RECOGNITION_URL: Final = "facial_recognition_url"
+CONF_FACIAL_RECOGNITION_ENABLED: Final = "facial_recognition_enabled"
+CONF_FACIAL_RECOGNITION_CONFIDENCE: Final = "facial_recognition_confidence"
+
+DEFAULT_FACIAL_RECOGNITION_URL: Final = "http://localhost:8100"
+DEFAULT_FACIAL_RECOGNITION_ENABLED: Final = False
+DEFAULT_FACIAL_RECOGNITION_CONFIDENCE: Final = 50
+
+# =============================================================================
 # SERVICE NAMES
 # =============================================================================
 SERVICE_ANALYZE_CAMERA: Final = "analyze_camera"

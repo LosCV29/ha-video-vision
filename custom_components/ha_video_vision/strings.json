@@ -49,7 +49,8 @@
           "cameras": "Select Cameras",
           "voice_aliases": "Voice Aliases",
           "video_quality": "Video Quality",
-          "ai_settings": "AI Settings"
+          "ai_settings": "AI Settings",
+          "facial_recognition": "Facial Recognition"
         }
       },
       "default_provider": {
@@ -131,6 +132,15 @@
         "data": {
           "vllm_max_tokens": "Max Response Length (tokens)",
           "vllm_temperature": "Temperature (creativity)"
+        }
+      },
+      "facial_recognition": {
+        "title": "Facial Recognition",
+        "description": "Configure the Facial Recognition add-on. {url_hint}",
+        "data": {
+          "facial_recognition_enabled": "Enable Facial Recognition",
+          "facial_recognition_url": "Server URL",
+          "facial_recognition_confidence": "Minimum Confidence"
         }
       }
     },

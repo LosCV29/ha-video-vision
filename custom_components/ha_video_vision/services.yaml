@@ -65,10 +65,10 @@ identify_faces:
         text:
     server_url:
       name: Server URL
-      description: URL of the facial recognition add-on server
-      required: true
-      default: "http://homeassistant.local:8100"
-      example: "http://homeassistant.local:8100"
+      description: URL of the facial recognition server. Leave empty to use the configured URL from integration settings.
+      required: false
+      default: ""
+      example: "http://localhost:8100"
       selector:
         text:
     min_confidence:
