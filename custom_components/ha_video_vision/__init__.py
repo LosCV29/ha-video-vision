@@ -528,9 +528,12 @@ class VideoAnalyzer:
 
         For cloud-based cameras (Ring, Nest, etc.), the first snapshot may be stale.
         Retry with delays to allow the camera to process new events.
+
+        The function requests multiple snapshots and compares them to detect fresh content.
         """
         last_image = None
         last_error = None
+        initial_delay = delay
 
         for attempt in range(retries):
             try:
@@ -546,21 +549,29 @@ class VideoAnalyzer:
                 image = await async_get_image(self.hass, entity_id)
                 if image and image.content:
                     # Got a valid image
-                    if last_image and image.content == last_image:
-                        # Same image as before - camera may be returning cached/stale image
+                    if last_image is not None:
+                        if image.content != last_image:
+                            # Different image from previous - this indicates fresh content!
+                            _LOGGER.debug(
+                                "Got fresh snapshot from %s on attempt %d (%d bytes) - content changed",
+                                entity_id, attempt + 1, len(image.content)
+                            )
+                            return image.content
+                        else:
+                            # Same image as before - camera returning cached/stale image
+                            _LOGGER.debug(
+                                "Snapshot from %s unchanged on attempt %d, retrying...",
+                                entity_id, attempt + 1
+                            )
+                    else:
+                        # First image - save for comparison but continue to verify freshness
                         _LOGGER.debug(
-                            "Snapshot from %s unchanged on attempt %d, retrying...",
-                            entity_id, attempt + 1
+                            "Got initial snapshot from %s (%d bytes), verifying freshness...",
+                            entity_id, len(image.content)
                         )
-                        continue
 
-                    _LOGGER.debug(
-                        "Got snapshot from %s on attempt %d (%d bytes)",
-                        entity_id, attempt + 1, len(image.content)
-                    )
-                    return image.content
-
-                last_image = image.content if image else None
+                    # Always save the image for comparison
+                    last_image = image.content
 
             except Exception as e:
                 last_error = e
@@ -576,9 +587,10 @@ class VideoAnalyzer:
                 entity_id, retries, last_error
             )
         elif last_image:
-            _LOGGER.debug(
-                "Returning possibly stale snapshot from %s (unchanged across retries)",
-                entity_id
+            _LOGGER.warning(
+                "Snapshot from %s unchanged across %d attempts - may be stale (cloud camera cache). "
+                "Consider increasing 'Capture Delay' in blueprint settings.",
+                entity_id, retries
             )
             return last_image
         else:
@@ -590,13 +602,71 @@ class VideoAnalyzer:
         return last_image
 
     async def _get_stream_url(self, entity_id: str) -> str | None:
-        """Get RTSP/stream URL from camera entity."""
+        """Get RTSP/stream URL from camera entity.
+
+        For cloud cameras (Ring, Nest, etc.), this may require activating the stream first.
+        Tries multiple methods to obtain a valid stream URL.
+        """
+        # Method 1: Standard stream source retrieval
         try:
             stream_url = await async_get_stream_source(self.hass, entity_id)
-            return stream_url
+            if stream_url:
+                _LOGGER.debug("Got stream URL for %s via async_get_stream_source", entity_id)
+                return stream_url
         except Exception as e:
-            _LOGGER.debug("Could not get stream URL for %s: %s", entity_id, e)
-            return None
+            _LOGGER.debug("async_get_stream_source failed for %s: %s", entity_id, e)
+
+        # Method 2: Try to get stream URL directly from camera entity
+        # Some cloud cameras expose stream_source as an attribute after activation
+        try:
+            state = self.hass.states.get(entity_id)
+            if state and state.attributes:
+                # Check for stream source in attributes
+                stream_source = state.attributes.get("stream_source")
+                if stream_source:
+                    _LOGGER.debug("Got stream URL for %s from entity attributes", entity_id)
+                    return stream_source
+
+                # Check for frontend_stream_type - indicates streaming capability
+                stream_type = state.attributes.get("frontend_stream_type")
+                if stream_type:
+                    _LOGGER.debug(
+                        "Camera %s supports streaming (type: %s) but no direct URL available",
+                        entity_id, stream_type
+                    )
+        except Exception as e:
+            _LOGGER.debug("Failed to check entity attributes for %s: %s", entity_id, e)
+
+        # Method 3: Try triggering a stream via camera.turn_on service
+        # Some cloud cameras need to be "woken up" before streaming
+        try:
+            camera_domain = entity_id.split(".")[0]
+            if camera_domain == "camera":
+                # Check if camera supports turn_on
+                state = self.hass.states.get(entity_id)
+                if state and state.state == "idle":
+                    _LOGGER.debug("Attempting to activate camera %s before stream retrieval", entity_id)
+                    await self.hass.services.async_call(
+                        "camera",
+                        "turn_on",
+                        {"entity_id": entity_id},
+                        blocking=True,
+                    )
+                    # Wait a moment for stream to initialize
+                    await asyncio.sleep(2)
+                    # Try to get stream URL again
+                    stream_url = await async_get_stream_source(self.hass, entity_id)
+                    if stream_url:
+                        _LOGGER.debug("Got stream URL for %s after activation", entity_id)
+                        return stream_url
+        except Exception as e:
+            _LOGGER.debug("Camera activation attempt failed for %s: %s", entity_id, e)
+
+        _LOGGER.debug(
+            "No stream URL available for %s - camera may be cloud-based (Ring, Nest, etc.)",
+            entity_id
+        )
+        return None
 
     def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
         """Build ffmpeg command based on stream type (RTSP vs HLS/HTTP)."""
@@ -728,11 +798,13 @@ class VideoAnalyzer:
             # Use more retries and longer delays for cloud cameras
             _LOGGER.warning(
                 "No stream URL for %s - using snapshot mode (cloud camera). "
-                "If images are stale, increase 'Capture Delay' in the blueprint.",
+                "Video-only providers (Google Gemini, OpenRouter) will not work. "
+                "Consider using a local vLLM provider for cloud cameras, or "
+                "increase 'Capture Delay' in the blueprint if snapshots are stale.",
                 entity_id
             )
             frame_bytes = await self._get_camera_snapshot(
-                entity_id, retries=4, delay=1.5
+                entity_id, retries=5, delay=2.0  # More retries with longer delays for cloud cameras
             )
             return video_bytes, frame_bytes
 
@@ -896,7 +968,13 @@ class VideoAnalyzer:
         """Analyze using Google Gemini - VIDEO ONLY."""
         # VIDEO ONLY - This integration focuses on video analysis, not images
         if not video_bytes:
-            return "No video available for analysis. This integration requires video input."
+            return (
+                "No video available for analysis. This camera does not provide a video stream "
+                "(common with cloud cameras like Ring or Nest). Google Gemini requires video input. "
+                "Solutions: 1) Use a local vLLM provider which supports image analysis, "
+                "2) Use the ring-mqtt add-on to enable RTSP streaming, or "
+                "3) Switch to a camera that provides direct video streams."
+            )
 
         # Use provided overrides or fall back to config
         model = model or self.vllm_model
@@ -985,7 +1063,13 @@ class VideoAnalyzer:
         """Analyze using OpenRouter with VIDEO ONLY support."""
         # VIDEO ONLY - This integration focuses on video analysis, not images
         if not video_bytes:
-            return "No video available for analysis. This integration requires video input."
+            return (
+                "No video available for analysis. This camera does not provide a video stream "
+                "(common with cloud cameras like Ring or Nest). OpenRouter requires video input. "
+                "Solutions: 1) Use a local vLLM provider which supports image analysis, "
+                "2) Use the ring-mqtt add-on to enable RTSP streaming, or "
+                "3) Switch to a camera that provides direct video streams."
+            )
 
         # Use provided overrides or fall back to config
         model = model or self.vllm_model
