@@ -587,7 +587,8 @@ class VideoAnalyzer:
         os.makedirs(self.snapshot_dir, exist_ok=True)
         video_path = None
         
-        friendly_name = self.hass.states.get(entity_id).attributes.get("friendly_name", entity_id)
+        state = self.hass.states.get(entity_id)
+        friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         safe_name = entity_id.replace("camera.", "").replace(".", "_")
         
         try:
