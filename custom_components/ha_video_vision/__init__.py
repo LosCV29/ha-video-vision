@@ -782,25 +782,7 @@ class VideoAnalyzer:
             for word in ["person", "people", "someone", "man", "woman", "child"]
         )
 
-        # Facial recognition - auto-run if enabled and snapshot exists
-        facial_recognition_result = None
-        if self.config.get(CONF_FACIAL_RECOGNITION_ENABLED, False) and snapshot_path:
-            facial_recognition_url = self.config.get(
-                CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL
-            )
-            facial_recognition_confidence = self.config.get(
-                CONF_FACIAL_RECOGNITION_CONFIDENCE, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE
-            )
-            _LOGGER.info(
-                "Facial recognition enabled - calling %s with confidence %d",
-                facial_recognition_url, facial_recognition_confidence
-            )
-            facial_recognition_result = await self.identify_faces(
-                snapshot_path, facial_recognition_url, facial_recognition_confidence
-            )
-            _LOGGER.info("Facial recognition result: %s", facial_recognition_result)
-
-        result = {
+        return {
             "success": True,
             "camera": entity_id,
             "friendly_name": friendly_name,
@@ -811,17 +793,6 @@ class VideoAnalyzer:
             "provider_used": provider_used,
             "default_provider": self.provider,
         }
-
-        # Add facial recognition data if available
-        if facial_recognition_result:
-            result["facial_recognition"] = facial_recognition_result
-            # Update description with identified people
-            if facial_recognition_result.get("success") and facial_recognition_result.get("summary"):
-                if facial_recognition_result["summary"] != "No known faces":
-                    result["identified_people"] = facial_recognition_result.get("identified_people", [])
-                    result["faces_summary"] = facial_recognition_result["summary"]
-
-        return result
 
     async def _analyze_with_provider(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str
