@@ -61,6 +61,12 @@ from .const import (
     SERVICE_ANALYZE_CAMERA,
     SERVICE_RECORD_CLIP,
     SERVICE_IDENTIFY_FACES,
+    # Facial Recognition
+    CONF_FACIAL_RECOGNITION_URL,
+    CONF_FACIAL_RECOGNITION_ENABLED,
+    CONF_FACIAL_RECOGNITION_CONFIDENCE,
+    DEFAULT_FACIAL_RECOGNITION_URL,
+    DEFAULT_FACIAL_RECOGNITION_CONFIDENCE,
     # Attributes
     ATTR_CAMERA,
     ATTR_DURATION,
@@ -148,8 +154,8 @@ SERVICE_RECORD_SCHEMA = vol.Schema(
 SERVICE_IDENTIFY_FACES_SCHEMA = vol.Schema(
     {
         vol.Required("image_path"): cv.string,
-        vol.Required("server_url"): cv.string,
-        vol.Optional("min_confidence", default=50): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Optional("server_url"): cv.string,
+        vol.Optional("min_confidence"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
     }
 )
 
@@ -219,8 +225,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_identify_faces(call: ServiceCall) -> dict[str, Any]:
         """Handle identify_faces service call for facial recognition add-on."""
         image_path = call.data["image_path"]
-        server_url = call.data["server_url"]
-        min_confidence = call.data.get("min_confidence", 50)
+        # Use configured URL if not provided in service call
+        server_url = call.data.get("server_url") or config.get(
+            CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL
+        )
+        min_confidence = call.data.get("min_confidence") or config.get(
+            CONF_FACIAL_RECOGNITION_CONFIDENCE, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE
+        )
 
         return await analyzer.identify_faces(image_path, server_url, min_confidence)
 
