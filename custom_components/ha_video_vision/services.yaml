@@ -28,6 +28,13 @@ analyze_camera:
       selector:
         text:
           multiline: true
+    facial_recognition:
+      name: Facial Recognition
+      description: Enable facial recognition for this analysis. Only runs when enabled - no slowdown for manual calls.
+      required: false
+      default: false
+      selector:
+        boolean:
 
 record_clip:
   name: Record Clip

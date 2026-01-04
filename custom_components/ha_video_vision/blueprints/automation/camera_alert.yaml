@@ -140,12 +140,13 @@ action:
   - delay:
       seconds: "{{ delay_seconds }}"
 
-  # Analyze camera with prompt
+  # Analyze camera with prompt (includes facial recognition when enabled)
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
       duration: 3
       user_query: "{{ user_prompt if user_prompt else default_prompt }}"
+      facial_recognition: "{{ face_rec_enabled }}"
     response_variable: result
 
   # Send notifications if successful
@@ -154,30 +155,15 @@ action:
           - condition: template
             value_template: "{{ result.success == true }}"
         sequence:
-          # Facial recognition (if enabled and snapshot available)
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ face_rec_enabled and result.snapshot_path }}"
-                sequence:
-                  - service: ha_video_vision.identify_faces
-                    data:
-                      image_path: "{{ result.snapshot_path }}"
-                    response_variable: face_result
-            default:
-              - variables:
-                  face_result:
-                    success: false
-                    summary: ""
-
           - variables:
               tag: "ha_video_vision_{{ camera_input }}"
               notification_title: "{{ result.friendly_name }}"
               # Include facial recognition results in message if available
               notification_message: >
                 {% set desc = result.description if result.description else 'Motion detected on camera' %}
-                {% if face_rec_enabled and face_result.success and face_result.summary and face_result.summary != 'No known faces' %}
-                  {{ face_result.summary }} - {{ desc }}
+                {% set face_rec = result.get('face_recognition', {}) %}
+                {% if face_rec.get('success') and face_rec.get('summary') and face_rec.get('summary') != 'No known faces' %}
+                  {{ face_rec.summary }} - {{ desc }}
                 {% else %}
                   {{ desc }}
                 {% endif %}
