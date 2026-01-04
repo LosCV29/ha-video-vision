@@ -245,18 +245,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Face recognition result: %s", face_result)
 
         # Save to timeline if remember is enabled
+        # IMPORTANT: Wrap in try/except to ensure Timeline errors don't break notifications
         if do_remember and result.get("success"):
             timeline = hass.data[DOMAIN][entry.entry_id].get("timeline")
             if timeline:
-                await timeline.async_add_event(
-                    camera_entity=result.get("camera", ""),
-                    camera_name=result.get("friendly_name", ""),
-                    description=result.get("description", ""),
-                    snapshot_path=result.get("snapshot_path"),
-                    person_detected=result.get("person_detected", False),
-                    provider=result.get("provider_used"),
-                )
-                _LOGGER.debug("Saved analysis to timeline for %s", result.get("friendly_name"))
+                try:
+                    await timeline.async_add_event(
+                        camera_entity=result.get("camera", ""),
+                        camera_name=result.get("friendly_name", ""),
+                        description=result.get("description", ""),
+                        snapshot_path=result.get("snapshot_path"),
+                        person_detected=result.get("person_detected", False),
+                        provider=result.get("provider_used"),
+                    )
+                    _LOGGER.debug("Saved analysis to timeline for %s", result.get("friendly_name"))
+                except Exception as e:
+                    _LOGGER.warning(
+                        "Failed to save to timeline for %s (notifications will still be sent): %s",
+                        result.get("friendly_name"), e
+                    )
 
         return result
 
