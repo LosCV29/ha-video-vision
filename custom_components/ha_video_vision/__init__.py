@@ -1082,9 +1082,15 @@ class VideoAnalyzer:
         Returns:
             Dict with faces_detected, identified_people, and summary
         """
+        _LOGGER.info("=== FACIAL RECOGNITION DEBUG ===")
+        _LOGGER.info("Image path: %s", image_path)
+        _LOGGER.info("Server URL: %s", server_url)
+        _LOGGER.info("Min confidence: %s", min_confidence)
+
         try:
             # Read image file
             if not os.path.exists(image_path):
+                _LOGGER.error("Image file NOT FOUND: %s", image_path)
                 return {
                     "success": False,
                     "error": f"Image not found: {image_path}",
@@ -1093,24 +1099,33 @@ class VideoAnalyzer:
                     "summary": "",
                 }
 
+            _LOGGER.info("Image file exists, reading...")
             async with aiofiles.open(image_path, 'rb') as f:
                 image_bytes = await f.read()
+            _LOGGER.info("Image size: %d bytes", len(image_bytes))
 
             image_b64 = base64.b64encode(image_bytes).decode()
             url = f"{server_url.rstrip('/')}/identify"
+            _LOGGER.info("Calling facial recognition API: %s", url)
 
             async with asyncio.timeout(30):
                 async with self._session.post(url, json={"image_base64": image_b64}) as response:
+                    _LOGGER.info("API response status: %d", response.status)
                     if response.status == 200:
                         result = await response.json()
+                        _LOGGER.info("RAW API RESPONSE: %s", result)
 
                         # Filter by confidence threshold
+                        all_people = result.get("people", [])
+                        _LOGGER.info("All people from API: %s", all_people)
+
                         identified_people = [
-                            p for p in result.get("people", [])
+                            p for p in all_people
                             if p.get("name") != "Unknown" and p.get("confidence", 0) >= min_confidence
                         ]
+                        _LOGGER.info("After filtering (min_confidence=%d): %s", min_confidence, identified_people)
 
-                        return {
+                        final_result = {
                             "success": True,
                             "faces_detected": result.get("faces_detected", 0),
                             "identified_people": identified_people,
@@ -1119,6 +1134,8 @@ class VideoAnalyzer:
                                 for p in identified_people
                             ]) if identified_people else "No known faces",
                         }
+                        _LOGGER.info("FINAL RESULT: %s", final_result)
+                        return final_result
                     else:
                         error = await response.text()
                         _LOGGER.warning("Facial recognition error (%d): %s", response.status, error[:200])
@@ -1131,6 +1148,7 @@ class VideoAnalyzer:
                         }
 
         except asyncio.TimeoutError:
+            _LOGGER.error("Facial recognition TIMEOUT after 30 seconds")
             return {
                 "success": False,
                 "error": "Request timed out",
@@ -1139,7 +1157,7 @@ class VideoAnalyzer:
                 "summary": "",
             }
         except Exception as e:
-            _LOGGER.warning("Facial recognition error: %s", e)
+            _LOGGER.error("Facial recognition EXCEPTION: %s", e, exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
