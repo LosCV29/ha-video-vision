@@ -129,8 +129,8 @@ variables:
   delay_seconds: !input capture_delay
   face_rec_enabled: !input facial_recognition_enabled
   timeline_enabled: !input save_to_timeline
-  # Default prompt - factual and deterministic
-  default_prompt: "Briefly describe what you see. Only state what is clearly visible. Do not speculate. If a person is visible, describe their appearance and actions. 2-3 sentences max."
+  # Default prompt - reports ALL people/vehicles whether moving or stationary
+  default_prompt: "Describe any people, vehicles, or notable activity visible. Report ALL people and vehicles, whether moving or stationary. For people, describe their appearance and actions. Ignore static background objects like parked cars and structures. If no people, vehicles, or notable activity are present, respond: 'No activity observed.' 2-3 sentences max."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}

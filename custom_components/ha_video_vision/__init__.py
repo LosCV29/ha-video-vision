@@ -888,10 +888,10 @@ class VideoAnalyzer:
                     pass
 
     async def _record_video_and_frames(self, entity_id: str, duration: int) -> tuple[bytes | None, bytes | None]:
-        """Record video and extract KEY FRAME from camera entity.
+        """Record video and extract KEY FRAME from the recorded video.
 
-        Captures the snapshot 1-2 seconds into recording to get the actual activity,
-        not just the first frame. This ensures the snapshot shows what triggered the alert.
+        IMPORTANT: The snapshot is extracted FROM the recorded video file to ensure
+        perfect synchronization - the AI sees exactly what's in the snapshot.
 
         Returns: (video_bytes, frame_bytes)
         """
@@ -928,40 +928,45 @@ class VideoAnalyzer:
             _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
                          self.video_fps_percent, native_fps, target_fps)
 
-            # Build video recording command
+            # Build and run video recording command
             video_cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path, target_fps)
 
-            # Start video recording IMMEDIATELY
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE
             )
 
-            # Capture KEY FRAME at the MIDPOINT of recording
-            # 2s recording = snapshot at 1s, 3s recording = snapshot at 1.5s, etc.
-            snapshot_delay = duration / 2
-            await asyncio.sleep(snapshot_delay)
-
-            # Now capture the key frame - this shows the actual activity
-            frame_cmd = self._build_ffmpeg_frame_cmd(stream_url, frame_path)
-            frame_proc = await asyncio.create_subprocess_exec(
-                *frame_cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-
-            # Wait for both processes to complete
+            # Wait for video recording to complete
             await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
-            await asyncio.wait_for(frame_proc.wait(), timeout=10)
 
+            # Read the video file
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 async with aiofiles.open(video_path, 'rb') as f:
                     video_bytes = await f.read()
 
-            if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
-                async with aiofiles.open(frame_path, 'rb') as f:
-                    frame_bytes = await f.read()
+                # Extract KEY FRAME from the RECORDED VIDEO at the midpoint
+                # This ensures the snapshot matches EXACTLY what the AI sees
+                midpoint = duration / 2
+                frame_cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(midpoint),  # Seek to midpoint
+                    "-i", video_path,       # Input is the recorded video
+                    "-frames:v", "1",
+                    "-q:v", "2",
+                    frame_path
+                ]
+
+                frame_proc = await asyncio.create_subprocess_exec(
+                    *frame_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(frame_proc.wait(), timeout=10)
+
+                if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
+                    async with aiofiles.open(frame_path, 'rb') as f:
+                        frame_bytes = await f.read()
 
             return video_bytes, frame_bytes
 
