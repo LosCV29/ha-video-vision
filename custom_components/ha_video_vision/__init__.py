@@ -50,8 +50,10 @@ from .const import (
     # Video
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
+    CONF_VIDEO_FPS_PERCENT,
     DEFAULT_VIDEO_DURATION,
     DEFAULT_VIDEO_WIDTH,
+    DEFAULT_VIDEO_FPS_PERCENT,
     # Snapshot
     CONF_SNAPSHOT_DIR,
     CONF_SNAPSHOT_QUALITY,
@@ -398,14 +400,15 @@ class VideoAnalyzer:
         # Video settings
         self.video_duration = config.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION)
         self.video_width = config.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH)
+        self.video_fps_percent = config.get(CONF_VIDEO_FPS_PERCENT, DEFAULT_VIDEO_FPS_PERCENT)
 
         # Snapshot settings
         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
         self.snapshot_quality = config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)
 
         _LOGGER.info(
-            "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp",
-            self.provider, len(self.selected_cameras), self.video_width
+            "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp, FPS: %d%%",
+            self.provider, len(self.selected_cameras), self.video_width, self.video_fps_percent
         )
         # Log configured providers
         if self.provider_configs:
@@ -721,7 +724,43 @@ class VideoAnalyzer:
         )
         return None
 
-    def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
+    async def _get_stream_fps(self, stream_url: str) -> float:
+        """Probe stream to get native FPS using ffprobe."""
+        try:
+            cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate",
+                "-of", "csv=p=0",
+            ]
+
+            if stream_url.startswith("rtsp://"):
+                cmd.extend(["-rtsp_transport", "tcp"])
+
+            cmd.append(stream_url)
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+
+            if proc.returncode == 0 and stdout:
+                # Parse frame rate (format: "30/1" or "30000/1001")
+                fps_str = stdout.decode().strip()
+                if "/" in fps_str:
+                    num, den = fps_str.split("/")
+                    return float(num) / float(den)
+                return float(fps_str)
+        except Exception as e:
+            _LOGGER.debug("Could not probe stream FPS: %s", e)
+
+        # Default to 30fps if probe fails
+        return 30.0
+
+    def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str, target_fps: float = None) -> list[str]:
         """Build ffmpeg command based on stream type (RTSP vs HLS/HTTP)."""
         # Base command
         cmd = ["ffmpeg", "-y"]
@@ -735,11 +774,17 @@ class VideoAnalyzer:
         # Input
         cmd.extend(["-i", stream_url])
 
+        # Build video filter - scale and optionally fps
+        vf_filters = [f"scale={self.video_width}:-2"]
+
+        # Add FPS filter if not 100% (native)
+        if target_fps and self.video_fps_percent < 100:
+            vf_filters.append(f"fps={target_fps}")
+
         # Duration and encoding
         cmd.extend([
             "-t", str(duration),
-            "-vf", f"scale={self.video_width}:-2",
-            "-r", "10",
+            "-vf", ",".join(vf_filters),
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "28",
@@ -795,10 +840,16 @@ class VideoAnalyzer:
         try:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False, dir=self.snapshot_dir) as vf:
                 video_path = vf.name
-            
+
+            # Probe native FPS and calculate target based on user's percentage setting
+            native_fps = await self._get_stream_fps(stream_url)
+            target_fps = native_fps * (self.video_fps_percent / 100)
+            _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
+                         self.video_fps_percent, native_fps, target_fps)
+
             # Build command based on stream type (RTSP vs HLS/HTTP)
-            cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path)
-            
+            cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path, target_fps)
+
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -871,8 +922,14 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
 
+            # Probe native FPS and calculate target based on user's percentage setting
+            native_fps = await self._get_stream_fps(stream_url)
+            target_fps = native_fps * (self.video_fps_percent / 100)
+            _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
+                         self.video_fps_percent, native_fps, target_fps)
+
             # Build video recording command
-            video_cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path)
+            video_cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path, target_fps)
 
             # Start video recording IMMEDIATELY
             video_proc = await asyncio.create_subprocess_exec(
@@ -881,9 +938,9 @@ class VideoAnalyzer:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            # Wait 1-2 seconds into recording to capture KEY FRAME of the activity
-            # This ensures we capture the actual event, not just the start
-            snapshot_delay = min(1.5, duration / 2)  # 1.5s or half duration, whichever is less
+            # Capture KEY FRAME at the MIDPOINT of recording
+            # 2s recording = snapshot at 1s, 3s recording = snapshot at 1.5s, etc.
+            snapshot_delay = duration / 2
             await asyncio.sleep(snapshot_delay)
 
             # Now capture the key frame - this shows the actual activity

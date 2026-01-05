@@ -44,8 +44,10 @@ from .const import (
     # Video Settings
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
+    CONF_VIDEO_FPS_PERCENT,
     DEFAULT_VIDEO_DURATION,
     DEFAULT_VIDEO_WIDTH,
+    DEFAULT_VIDEO_FPS_PERCENT,
     # Snapshot
     CONF_SNAPSHOT_DIR,
     CONF_SNAPSHOT_QUALITY,
@@ -337,7 +339,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 "configure_local": "Configure Local vLLM",
                 "cameras": "Select Cameras",
                 "voice_aliases": "Voice Aliases",
-                "video_quality": "Video Quality",
+                "video_quality": "Video Settings",
                 "ai_settings": "AI Settings",
                 "facial_recognition": "Facial Recognition",
                 "timeline": "Timeline",
@@ -760,6 +762,8 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             if CONF_VIDEO_WIDTH in user_input:
                 user_input[CONF_VIDEO_WIDTH] = int(user_input[CONF_VIDEO_WIDTH])
+            if CONF_VIDEO_FPS_PERCENT in user_input:
+                user_input[CONF_VIDEO_FPS_PERCENT] = int(user_input[CONF_VIDEO_FPS_PERCENT])
             new_options = {**self._entry.options, **user_input}
             return self.async_create_entry(title="", data=new_options)
 
@@ -774,6 +778,17 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_VIDEO_WIDTH, default=str(current.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH))): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[{"label": "480p", "value": "480"}, {"label": "640p", "value": "640"}, {"label": "720p", "value": "720"}, {"label": "1080p", "value": "1080"}],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(CONF_VIDEO_FPS_PERCENT, default=str(current.get(CONF_VIDEO_FPS_PERCENT, DEFAULT_VIDEO_FPS_PERCENT))): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            {"label": "25% (smaller files)", "value": "25"},
+                            {"label": "50%", "value": "50"},
+                            {"label": "75%", "value": "75"},
+                            {"label": "100% (native)", "value": "100"},
+                        ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
