@@ -11,8 +11,6 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
-from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
-import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -186,12 +184,11 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Fetch available models from provider API."""
         try:
             async with aiohttp.ClientSession() as session:
+                headers = {}
                 if provider == PROVIDER_LOCAL:
                     url = f"{config.get(CONF_VLLM_URL, DEFAULT_VLLM_URL)}/models"
-                    headers = {}
                 elif provider == PROVIDER_GOOGLE:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={config[CONF_API_KEY]}"
-                    headers = {}
                 elif provider == PROVIDER_OPENROUTER:
                     url = "https://openrouter.ai/api/v1/models"
                     headers = {"Authorization": f"Bearer {config[CONF_API_KEY]}"}
@@ -616,12 +613,11 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         """Fetch available models from provider API."""
         try:
             async with aiohttp.ClientSession() as session:
+                headers = {}
                 if provider == PROVIDER_LOCAL:
                     url = f"{config.get(CONF_VLLM_URL, DEFAULT_VLLM_URL)}/models"
-                    headers = {}
                 elif provider == PROVIDER_GOOGLE:
                     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={config[CONF_API_KEY]}"
-                    headers = {}
                 elif provider == PROVIDER_OPENROUTER:
                     url = "https://openrouter.ai/api/v1/models"
                     headers = {"Authorization": f"Bearer {config[CONF_API_KEY]}"}

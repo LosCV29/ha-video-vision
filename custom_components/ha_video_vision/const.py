@@ -70,21 +70,6 @@ DEFAULT_SELECTED_CAMERAS: Final = []
 CONF_CAMERA_ALIASES: Final = "camera_aliases"
 DEFAULT_CAMERA_ALIASES: Final = {}
 
-# LEGACY: Manual RTSP config (kept for backward compatibility)
-CONF_RTSP_HOST: Final = "rtsp_host"
-CONF_RTSP_PORT: Final = "rtsp_port"
-CONF_RTSP_USERNAME: Final = "rtsp_username"
-CONF_RTSP_PASSWORD: Final = "rtsp_password"
-CONF_RTSP_STREAM_TYPE: Final = "rtsp_stream_type"
-CONF_CAMERAS: Final = "cameras"
-
-DEFAULT_RTSP_HOST: Final = ""
-DEFAULT_RTSP_PORT: Final = 554
-DEFAULT_RTSP_USERNAME: Final = "admin"
-DEFAULT_RTSP_PASSWORD: Final = ""
-DEFAULT_RTSP_STREAM_TYPE: Final = "sub"
-DEFAULT_CAMERAS: Final = {}
-
 # =============================================================================
 # VIDEO SETTINGS
 # =============================================================================
@@ -136,7 +121,5 @@ SERVICE_IDENTIFY_FACES: Final = "identify_faces"
 ATTR_CAMERA: Final = "camera"
 ATTR_DURATION: Final = "duration"
 ATTR_USER_QUERY: Final = "user_query"
-ATTR_NOTIFY: Final = "notify"
-ATTR_PROVIDER: Final = "provider"
 ATTR_FACIAL_RECOGNITION: Final = "facial_recognition"
 ATTR_REMEMBER: Final = "remember"

@@ -63,7 +63,6 @@ from .const import (
     SERVICE_IDENTIFY_FACES,
     # Facial Recognition
     CONF_FACIAL_RECOGNITION_URL,
-    CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_CONFIDENCE,
     DEFAULT_FACIAL_RECOGNITION_URL,
     DEFAULT_FACIAL_RECOGNITION_CONFIDENCE,
@@ -648,11 +647,12 @@ class VideoAnalyzer:
         try:
             state = self.hass.states.get(entity_id)
             if state and state.attributes:
-                # Check for stream source in attributes
-                stream_source = state.attributes.get("stream_source")
-                if stream_source:
-                    _LOGGER.debug("Got stream URL for %s from entity attributes", entity_id)
-                    return stream_source
+                # Check for stream source in attributes (various naming conventions)
+                for attr_name in ["stream_source", "rtsp_stream", "rtsp_url", "video_url"]:
+                    stream_source = state.attributes.get(attr_name)
+                    if stream_source and stream_source.startswith("rtsp://"):
+                        _LOGGER.debug("Got stream URL for %s from %s attribute", entity_id, attr_name)
+                        return stream_source
 
                 # Check for frontend_stream_type - indicates streaming capability
                 stream_type = state.attributes.get("frontend_stream_type")
@@ -664,7 +664,33 @@ class VideoAnalyzer:
         except Exception as e:
             _LOGGER.debug("Failed to check entity attributes for %s: %s", entity_id, e)
 
-        # Method 3: Try triggering a stream via camera.turn_on service
+        # Method 3: Check for ring-mqtt info sensor (stores RTSP URL separately)
+        # ring-mqtt creates sensor.{name}_info with stream_source attribute
+        try:
+            # Extract camera name from entity_id (e.g., camera.front_door -> front_door)
+            camera_name = entity_id.replace("camera.", "")
+
+            # Try common ring-mqtt info sensor naming patterns
+            info_sensor_patterns = [
+                f"sensor.{camera_name}_info",
+                f"sensor.{camera_name}_stream_source",
+                f"sensor.ring_{camera_name}_info",
+            ]
+
+            for sensor_id in info_sensor_patterns:
+                sensor_state = self.hass.states.get(sensor_id)
+                if sensor_state and sensor_state.attributes:
+                    stream_source = sensor_state.attributes.get("stream_source")
+                    if stream_source and stream_source.startswith("rtsp://"):
+                        _LOGGER.info(
+                            "Got stream URL for %s from ring-mqtt info sensor %s",
+                            entity_id, sensor_id
+                        )
+                        return stream_source
+        except Exception as e:
+            _LOGGER.debug("ring-mqtt info sensor check failed for %s: %s", entity_id, e)
+
+        # Method 4: Try triggering a stream via camera.turn_on service
         # Some cloud cameras need to be "woken up" before streaming
         try:
             camera_domain = entity_id.split(".")[0]
