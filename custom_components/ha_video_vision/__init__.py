@@ -881,9 +881,9 @@ class VideoAnalyzer:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            # Wait 1-2 seconds into recording to capture KEY FRAME of the activity
-            # This ensures we capture the actual event, not just the start
-            snapshot_delay = min(1.5, duration / 2)  # 1.5s or half duration, whichever is less
+            # Capture KEY FRAME at the MIDPOINT of recording
+            # 2s recording = snapshot at 1s, 3s recording = snapshot at 1.5s, etc.
+            snapshot_delay = duration / 2
             await asyncio.sleep(snapshot_delay)
 
             # Now capture the key frame - this shows the actual activity
