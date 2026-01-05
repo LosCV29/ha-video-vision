@@ -837,7 +837,10 @@ class VideoAnalyzer:
                     pass
 
     async def _record_video_and_frames(self, entity_id: str, duration: int) -> tuple[bytes | None, bytes | None]:
-        """Record video and extract frames from camera entity.
+        """Record video and extract KEY FRAME from camera entity.
+
+        Captures the snapshot 1-2 seconds into recording to get the actual activity,
+        not just the first frame. This ensures the snapshot shows what triggered the alert.
 
         Returns: (video_bytes, frame_bytes)
         """
@@ -868,21 +871,30 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
 
-            # Build commands based on stream type (RTSP vs HLS/HTTP)
+            # Build video recording command
             video_cmd = self._build_ffmpeg_cmd(stream_url, duration, video_path)
-            frame_cmd = self._build_ffmpeg_frame_cmd(stream_url, frame_path)
 
+            # Start video recording IMMEDIATELY
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE
             )
+
+            # Wait 1-2 seconds into recording to capture KEY FRAME of the activity
+            # This ensures we capture the actual event, not just the start
+            snapshot_delay = min(1.5, duration / 2)  # 1.5s or half duration, whichever is less
+            await asyncio.sleep(snapshot_delay)
+
+            # Now capture the key frame - this shows the actual activity
+            frame_cmd = self._build_ffmpeg_frame_cmd(stream_url, frame_path)
             frame_proc = await asyncio.create_subprocess_exec(
                 *frame_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL
             )
 
+            # Wait for both processes to complete
             await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
             await asyncio.wait_for(frame_proc.wait(), timeout=10)
 

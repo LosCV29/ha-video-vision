@@ -66,6 +66,13 @@ blueprint:
           unit_of_measurement: "min"
       default: 2
 
+    notification_title:
+      name: "Notification Title"
+      description: "Custom title for notifications (e.g., 'Front Door', 'Backyard'). Leave empty to use camera name."
+      default: ""
+      selector:
+        text:
+
     tap_navigate:
       name: "Tap Navigate"
       description: "Dashboard to open when notification is tapped"
@@ -82,8 +89,8 @@ blueprint:
 
     capture_delay:
       name: "Capture Delay (seconds)"
-      description: "Wait time before capturing. Increase for cloud cameras (Ring, Nest) that need time to process new video. Default 1s works for local cameras, use 3-5s for cloud cameras."
-      default: 1
+      description: "Wait time before capturing. Set to 0 for INSTANT recording when person detected. Increase for cloud cameras (Ring, Nest) that need time to process new video (use 3-5s for cloud cameras)."
+      default: 0
       selector:
         number:
           min: 0
@@ -116,6 +123,7 @@ variables:
   tap_nav: !input tap_navigate
   camera_input: !input camera_name
   user_prompt: !input custom_prompt
+  custom_title: !input notification_title
   time_start: !input notify_start
   time_end: !input notify_end
   delay_seconds: !input capture_delay
@@ -145,15 +153,20 @@ condition:
     before: !input notify_end
 
 action:
-  # Wait for camera to capture (increase for cloud cameras like Ring/Nest)
-  - delay:
-      seconds: "{{ delay_seconds }}"
+  # Optional delay for cloud cameras - skip if 0 for instant recording
+  - if:
+      - condition: template
+        value_template: "{{ delay_seconds > 0 }}"
+    then:
+      - delay:
+          seconds: "{{ delay_seconds }}"
 
-  # Analyze camera with prompt (includes facial recognition and timeline when enabled)
+  # Analyze camera with prompt - uses integration's video_duration setting
+  # Recording starts INSTANTLY when delay is 0
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
-      duration: 3
+      # Duration omitted - uses integration's configured video_duration for consistent recording length
       user_query: "{{ user_prompt if user_prompt else default_prompt }}"
       facial_recognition: "{{ face_rec_enabled }}"
       remember: "{{ timeline_enabled }}"
@@ -166,8 +179,8 @@ action:
             value_template: "{{ result.success == true }}"
         sequence:
           - variables:
-              tag: "ha_video_vision_{{ camera_input }}"
-              notification_title: "{{ result.friendly_name }}"
+              # Use custom title if provided, otherwise use camera friendly name
+              notification_title: "{{ custom_title if custom_title else result.friendly_name }}"
               # Include facial recognition results in message if available
               notification_message: >
                 {% set desc = result.description if result.description else 'Motion detected on camera' %}
@@ -192,10 +205,8 @@ action:
                       # Tap actions
                       url: "{{ tap_nav }}"
                       clickAction: "{{ tap_nav }}"
-                      # Grouping
-                      tag: "{{ tag }}"
+                      # Grouping - no tag means notifications STACK instead of overwrite
                       group: "ha_video_vision"
-                      alert_once: true
                       # Priority
                       ttl: 0
                       priority: high
