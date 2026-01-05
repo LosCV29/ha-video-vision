@@ -753,9 +753,12 @@ class VideoAnalyzer:
         except Exception as e:
             _LOGGER.debug("Camera activation attempt failed for %s: %s", entity_id, e)
 
-        _LOGGER.debug(
-            "No stream URL available for %s - camera may be cloud-based (Ring, Nest, etc.)",
-            entity_id
+        _LOGGER.warning(
+            "No stream URL available for %s - this is likely a cloud camera (Ring, Nest, etc.). "
+            "For Ring cameras: Install ring-mqtt add-on, enable livestream, and verify the "
+            "'stream_source' attribute exists on the camera's Info sensor (sensor.%s_info). "
+            "See docs/RING_MQTT_SETUP.md for setup instructions.",
+            entity_id, entity_id.replace("camera.", "")
         )
         return None
 
@@ -1241,10 +1244,10 @@ class VideoAnalyzer:
         # VIDEO ONLY - This integration focuses on video analysis, not images
         if not video_bytes:
             return (
-                "Cloud camera detected (Ring/Nest) - no video stream available. "
-                "Google Gemini requires video input and cannot analyze snapshots. "
-                "To fix: Install the ring-mqtt add-on to enable RTSP streaming, "
-                "or switch to a provider that supports image analysis (Anthropic, OpenAI, or local vLLM)."
+                "No video stream available for this camera. "
+                "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
+                "then verify the 'stream_source' attribute exists on the camera's Info sensor. "
+                "See https://github.com/LosCV29/ha-video-vision/blob/main/docs/RING_MQTT_SETUP.md for setup guide."
             )
 
         # Use provided overrides or fall back to config
@@ -1335,10 +1338,10 @@ class VideoAnalyzer:
         # VIDEO ONLY - This integration focuses on video analysis, not images
         if not video_bytes:
             return (
-                "Cloud camera detected (Ring/Nest) - no video stream available. "
-                "OpenRouter requires video input and cannot analyze snapshots. "
-                "To fix: Install the ring-mqtt add-on to enable RTSP streaming, "
-                "or switch to a provider that supports image analysis (Anthropic, OpenAI, or local vLLM)."
+                "No video stream available for this camera. "
+                "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
+                "then verify the 'stream_source' attribute exists on the camera's Info sensor. "
+                "See https://github.com/LosCV29/ha-video-vision/blob/main/docs/RING_MQTT_SETUP.md for setup guide."
             )
 
         # Use provided overrides or fall back to config

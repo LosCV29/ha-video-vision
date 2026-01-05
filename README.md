@@ -378,6 +378,14 @@ When you say "check the garage camera", the system:
 - Add more reference photos
 - Lower confidence threshold
 
+### Ring cameras showing "No video stream available"
+Ring cameras are cloud-based and don't provide direct RTSP streams. You need:
+1. Install the **ring-mqtt** add-on
+2. Enable livestream in ring-mqtt configuration
+3. Verify `stream_source` attribute exists on your camera's Info sensor
+
+See [docs/RING_MQTT_SETUP.md](docs/RING_MQTT_SETUP.md) for complete setup guide.
+
 ---
 
 ## 📋 Version History
