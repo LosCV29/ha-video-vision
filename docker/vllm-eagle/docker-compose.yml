@@ -1,0 +1,34 @@
+services:
+  vllm-eagle:
+    image: nvcr.io/nvidia/vllm:25.12-py3
+    container_name: vllm-eagle
+    ports:
+      - "8000:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - VLLM_FLASH_ATTN_VERSION=2
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ipc: host
+    shm_size: '16gb'
+    command: >
+      python3 -m vllm.entrypoints.openai.api_server
+      --model nvidia/Eagle2.5-8B
+      --trust-remote-code
+      --max-model-len 65536
+      --gpu-memory-utilization 0.92
+      --host 0.0.0.0
+      --port 8000
+      --dtype auto
+      --enforce-eager
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:
