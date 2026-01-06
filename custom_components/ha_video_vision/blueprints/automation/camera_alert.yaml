@@ -98,6 +98,13 @@ blueprint:
           step: 1
           unit_of_measurement: "s"
 
+    instant_capture:
+      name: "Instant Capture Mode"
+      description: "Capture snapshot IMMEDIATELY when triggered, before recording video. Use this for fast-moving subjects (delivery people, runners) who may leave before video recording completes. The snapshot shows WHO triggered the motion, while video provides context for AI analysis."
+      default: true
+      selector:
+        boolean:
+
     # Facial Recognition
     facial_recognition_enabled:
       name: "Enable Facial Recognition"
@@ -127,6 +134,7 @@ variables:
   time_start: !input notify_start
   time_end: !input notify_end
   delay_seconds: !input capture_delay
+  instant_capture_enabled: !input instant_capture
   face_rec_enabled: !input facial_recognition_enabled
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles whether moving or stationary
@@ -162,7 +170,7 @@ action:
           seconds: "{{ delay_seconds }}"
 
   # Analyze camera with prompt - uses integration's video_duration setting
-  # Recording starts INSTANTLY when delay is 0
+  # Instant capture grabs snapshot FIRST before recording video
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
@@ -170,6 +178,7 @@ action:
       user_query: "{{ user_prompt if user_prompt else default_prompt }}"
       facial_recognition: "{{ face_rec_enabled }}"
       remember: "{{ timeline_enabled }}"
+      instant_capture: "{{ instant_capture_enabled }}"
     response_variable: result
 
   # Send notifications if successful

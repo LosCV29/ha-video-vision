@@ -42,6 +42,13 @@ analyze_camera:
       default: false
       selector:
         boolean:
+    instant_capture:
+      name: Instant Capture
+      description: Capture snapshot IMMEDIATELY when triggered, before recording video. Use for fast-moving subjects (delivery people, runners) who may leave before video recording completes. The snapshot shows WHO triggered the motion, while video provides AI context.
+      required: false
+      default: false
+      selector:
+        boolean:
 
 record_clip:
   name: Record Clip
