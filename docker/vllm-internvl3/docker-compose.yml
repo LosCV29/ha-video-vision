@@ -1,0 +1,33 @@
+services:
+  vllm-vision:
+    image: nvcr.io/nvidia/vllm:25.12-py3
+    container_name: vllm-vision
+    ports:
+      - "1235:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ipc: host
+    shm_size: '16gb'
+    command: >
+      python3 -m vllm.entrypoints.openai.api_server
+      --model OpenGVLab/InternVL3-8B
+      --trust-remote-code
+      --max-model-len 32768
+      --gpu-memory-utilization 0.92
+      --host 0.0.0.0
+      --port 8000
+      --enforce-eager
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:
