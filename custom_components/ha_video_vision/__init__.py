@@ -1041,18 +1041,21 @@ class VideoAnalyzer:
 
         Returns: (video_bytes, frame_bytes)
         """
-        stream_url = await self._get_stream_url(entity_id)
-
         video_bytes = None
         frame_bytes = None
 
-        # INSTANT CAPTURE MODE: Grab snapshot FIRST before anything else
-        # This ensures we capture whoever triggered the motion, even if they leave quickly
+        # ==============================================================
+        # INSTANT CAPTURE: VERY FIRST THING - NO DELAYS, NO PROBING
+        # This happens IMMEDIATELY when trigger fires
+        # ==============================================================
         if instant_capture:
-            _LOGGER.info("Instant capture mode: grabbing snapshot IMMEDIATELY for %s", entity_id)
+            _LOGGER.warning("INSTANT CAPTURE: Grabbing snapshot NOW for %s", entity_id)
             frame_bytes = await self._get_camera_snapshot(entity_id)
             if frame_bytes:
-                _LOGGER.info("Instant snapshot captured (%d bytes) - now recording video...", len(frame_bytes))
+                _LOGGER.warning("INSTANT CAPTURE: Got %d bytes - person captured!", len(frame_bytes))
+
+        # Now probe stream URL (this takes time, but snapshot already captured)
+        stream_url = await self._get_stream_url(entity_id)
 
         if not stream_url:
             # No stream URL (cloud camera like Ring/Nest) - use snapshot only
