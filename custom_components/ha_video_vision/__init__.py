@@ -1459,27 +1459,26 @@ class VideoAnalyzer:
             return f"Analysis error: {str(e)}"
 
     async def _analyze_local(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str) -> str:
-        """Analyze using local vLLM endpoint."""
-        if not video_bytes and not frame_bytes:
-            return "No video or image available for analysis"
+        """Analyze using local vLLM endpoint.
+
+        Note: Most local VLMs (InternVL3, Qwen-VL, LLaVA) are image-based models.
+        vLLM's OpenAI API doesn't support video_url for these models.
+        We always use frame_bytes (image) for local analysis.
+        """
+        if not frame_bytes:
+            return "No image available for analysis (local vLLM requires image frames)"
 
         try:
             url = f"{self.base_url}/chat/completions"
 
-            content = []
-
-            if video_bytes:
-                video_b64 = base64.b64encode(video_bytes).decode()
-                content.append({
-                    "type": "video_url",
-                    "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}
-                })
-            elif frame_bytes:
-                image_b64 = base64.b64encode(frame_bytes).decode()
-                content.append({
+            # Local VLMs use image input (not video) via vLLM's OpenAI API
+            image_b64 = base64.b64encode(frame_bytes).decode()
+            content = [
+                {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
-                })
+                }
+            ]
 
             content.append({"type": "text", "text": prompt})
 
