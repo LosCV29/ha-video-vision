@@ -1506,6 +1506,8 @@ class VideoAnalyzer:
                 ],
                 "max_tokens": self.vllm_max_tokens,
                 "temperature": self.vllm_temperature,
+                # Disable thinking mode for Qwen3 models - 4x faster inference
+                "chat_template_kwargs": {"enable_thinking": False},
             }
             
             async with asyncio.timeout(120):
