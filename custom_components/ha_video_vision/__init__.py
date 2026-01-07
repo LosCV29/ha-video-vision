@@ -1224,10 +1224,17 @@ class VideoAnalyzer:
             snapshot_path = await snapshot_task
 
         # Check for person-related words in AI description
+        # Expanded list to catch more variations of how the AI might describe people
         description_text = description or ""
+        person_keywords = [
+            "person", "people", "someone", "man", "woman", "child",
+            "individual", "adult", "figure", "pedestrian", "walker",
+            "visitor", "delivery", "carrier", "walking", "standing",
+            "approaching", "leaving", "human", "resident", "guest"
+        ]
         person_detected = any(
             word in description_text.lower()
-            for word in ["person", "people", "someone", "man", "woman", "child"]
+            for word in person_keywords
         )
 
         return {
@@ -1274,9 +1281,8 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
         model: str = None, api_key: str = None
     ) -> str:
-        """Analyze using Google Gemini - VIDEO ONLY."""
-        # VIDEO ONLY - This integration focuses on video analysis, not images
-        if not video_bytes:
+        """Analyze using Google Gemini with video and/or image support."""
+        if not video_bytes and not frame_bytes:
             return (
                 "No video stream available for this camera. "
                 "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
@@ -1291,16 +1297,46 @@ class VideoAnalyzer:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
-            parts = [{"text": prompt}]
+            parts = []
 
-            # VIDEO ONLY - no image fallback
-            video_b64 = base64.b64encode(video_bytes).decode()
-            parts.insert(0, {
-                "inline_data": {
-                    "mime_type": "video/mp4",
-                    "data": video_b64
-                }
-            })
+            # CRITICAL FIX: Include instant capture frame FIRST when available
+            # The instant capture frame shows the exact moment of motion trigger,
+            # while the video may be recorded AFTER the person has moved away.
+            # By including both, the AI can detect people who triggered the motion
+            # but left quickly (common with delivery people, passersby, etc.)
+            if frame_bytes:
+                image_b64 = base64.b64encode(frame_bytes).decode()
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": image_b64
+                    }
+                })
+
+            # Add video if available
+            if video_bytes:
+                video_b64 = base64.b64encode(video_bytes).decode()
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "video/mp4",
+                        "data": video_b64
+                    }
+                })
+
+            # Adjust prompt based on what media we have
+            if frame_bytes and video_bytes:
+                enhanced_prompt = (
+                    f"I'm providing an IMAGE and a VIDEO from a security camera. "
+                    f"The IMAGE was captured at the EXACT moment motion was detected. "
+                    f"The VIDEO was recorded immediately after. "
+                    f"IMPORTANT: Check BOTH the image AND video for people/activity - "
+                    f"someone may appear in the image but have left before the video started. "
+                    f"Report anyone visible in EITHER the image OR video.\n\n{prompt}"
+                )
+            else:
+                enhanced_prompt = prompt
+
+            parts.append({"text": enhanced_prompt})
             
             # System instruction to prevent hallucination of identities
             system_instruction = (
@@ -1368,9 +1404,8 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
         model: str = None, api_key: str = None
     ) -> str:
-        """Analyze using OpenRouter with VIDEO ONLY support."""
-        # VIDEO ONLY - This integration focuses on video analysis, not images
-        if not video_bytes:
+        """Analyze using OpenRouter with video and/or image support."""
+        if not video_bytes and not frame_bytes:
             return (
                 "No video stream available for this camera. "
                 "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
@@ -1400,16 +1435,42 @@ class VideoAnalyzer:
 
             content = []
 
-            # VIDEO ONLY - no image fallback
-            video_b64 = base64.b64encode(video_bytes).decode()
-            content.append({
-                "type": "video_url",
-                "video_url": {
-                    "url": f"data:video/mp4;base64,{video_b64}"
-                }
-            })
+            # CRITICAL FIX: Include instant capture frame FIRST when available
+            # The instant capture frame shows the exact moment of motion trigger,
+            # while the video may be recorded AFTER the person has moved away.
+            if frame_bytes:
+                image_b64 = base64.b64encode(frame_bytes).decode()
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_b64}"
+                    }
+                })
 
-            content.append({"type": "text", "text": prompt})
+            # Add video if available
+            if video_bytes:
+                video_b64 = base64.b64encode(video_bytes).decode()
+                content.append({
+                    "type": "video_url",
+                    "video_url": {
+                        "url": f"data:video/mp4;base64,{video_b64}"
+                    }
+                })
+
+            # Adjust prompt based on what media we have
+            if frame_bytes and video_bytes:
+                enhanced_prompt = (
+                    f"I'm providing an IMAGE and a VIDEO from a security camera. "
+                    f"The IMAGE was captured at the EXACT moment motion was detected. "
+                    f"The VIDEO was recorded immediately after. "
+                    f"IMPORTANT: Check BOTH the image AND video for people/activity - "
+                    f"someone may appear in the image but have left before the video started. "
+                    f"Report anyone visible in EITHER the image OR video.\n\n{prompt}"
+                )
+            else:
+                enhanced_prompt = prompt
+
+            content.append({"type": "text", "text": enhanced_prompt})
 
             # System message to prevent hallucination of identities
             system_message = (
@@ -1468,20 +1529,38 @@ class VideoAnalyzer:
 
             content = []
 
-            if video_bytes:
-                video_b64 = base64.b64encode(video_bytes).decode()
-                content.append({
-                    "type": "video_url",
-                    "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}
-                })
-            elif frame_bytes:
+            # CRITICAL FIX: Include instant capture frame FIRST when available
+            # The instant capture frame shows the exact moment of motion trigger,
+            # while the video may be recorded AFTER the person has moved away.
+            if frame_bytes:
                 image_b64 = base64.b64encode(frame_bytes).decode()
                 content.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
                 })
 
-            content.append({"type": "text", "text": prompt})
+            # Add video if available
+            if video_bytes:
+                video_b64 = base64.b64encode(video_bytes).decode()
+                content.append({
+                    "type": "video_url",
+                    "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}
+                })
+
+            # Adjust prompt based on what media we have
+            if frame_bytes and video_bytes:
+                enhanced_prompt = (
+                    f"I'm providing an IMAGE and a VIDEO from a security camera. "
+                    f"The IMAGE was captured at the EXACT moment motion was detected. "
+                    f"The VIDEO was recorded immediately after. "
+                    f"IMPORTANT: Check BOTH the image AND video for people/activity - "
+                    f"someone may appear in the image but have left before the video started. "
+                    f"Report anyone visible in EITHER the image OR video.\n\n{prompt}"
+                )
+            else:
+                enhanced_prompt = prompt
+
+            content.append({"type": "text", "text": enhanced_prompt})
 
             # System message to prevent hallucination - CRITICAL for accurate responses
             system_message = (
