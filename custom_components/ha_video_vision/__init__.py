@@ -858,17 +858,11 @@ class VideoAnalyzer:
         return None
 
     async def _probe_stream_fps(self, stream_url: str) -> float:
-        """Actually probe stream FPS using ffprobe (uncached).
-
-        Uses low-latency flags to minimize probe time.
-        """
+        """Actually probe stream FPS using ffprobe (uncached)."""
         try:
             cmd = [
                 "ffprobe",
                 "-v", "error",
-                # Low-latency flags - probe quickly without buffering
-                "-probesize", "32",
-                "-analyzeduration", "0",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=r_frame_rate",
                 "-of", "csv=p=0",
@@ -884,8 +878,8 @@ class VideoAnalyzer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            # Reduced timeout from 10s to 3s - if probe is slow, just use default
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+            # 5 second timeout - if probe is slow, just use default
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
 
             if proc.returncode == 0 and stdout:
                 # Parse frame rate (format: "30/1" or "30000/1001")
@@ -905,23 +899,18 @@ class VideoAnalyzer:
 
         Uses hardware acceleration if available (NVENC, QuickSync, VA-API, VideoToolbox).
         """
-        # Base command with low-latency flags for instant recording start
+        # Base command
         cmd = ["ffmpeg", "-y"]
 
-        # Low-latency input flags - START RECORDING IMMEDIATELY
-        # These minimize startup delay by reducing buffering and analysis time
-        cmd.extend([
-            "-fflags", "+nobuffer+flush_packets",
-            "-flags", "low_delay",
-            "-probesize", "32",
-            "-analyzeduration", "0",
-        ])
-
-        # Add protocol-specific options
+        # Add protocol-specific options BEFORE input (important for RTSP)
         if stream_url.startswith("rtsp://"):
-            # RTSP stream - use TCP transport for reliability
-            cmd.extend(["-rtsp_transport", "tcp"])
-        # For HLS/HTTP streams, no special transport needed
+            # RTSP stream - use TCP transport and reduce latency
+            cmd.extend([
+                "-rtsp_transport", "tcp",
+                "-fflags", "+nobuffer",
+                "-flags", "low_delay",
+            ])
+        # For HLS/HTTP streams, no special options needed
 
         # Input
         cmd.extend(["-i", stream_url])
@@ -1126,8 +1115,9 @@ class VideoAnalyzer:
             else:
                 _LOGGER.debug("Recording at native FPS (100%%) - skipping FPS probe for faster start")
 
-            # Build and run video recording command - START IMMEDIATELY, no delays
+            # Build and run video recording command
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path, target_fps)
+            _LOGGER.debug("FFmpeg command: %s", " ".join(video_cmd))
 
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
@@ -1136,7 +1126,19 @@ class VideoAnalyzer:
             )
 
             # Wait for video recording to complete
-            await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
+            try:
+                _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
+            except asyncio.TimeoutError:
+                video_proc.kill()
+                _LOGGER.error("FFmpeg timed out after %d seconds for %s", duration + 15, entity_id)
+                raise
+
+            # Check if ffmpeg succeeded
+            if video_proc.returncode != 0:
+                stderr_text = stderr.decode() if stderr else "No error output"
+                _LOGGER.error("FFmpeg failed (code %d) for %s: %s",
+                            video_proc.returncode, entity_id, stderr_text[:500])
+                raise RuntimeError(f"FFmpeg failed: {stderr_text[:200]}")
 
             # Read the video file
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
