@@ -858,11 +858,17 @@ class VideoAnalyzer:
         return None
 
     async def _probe_stream_fps(self, stream_url: str) -> float:
-        """Actually probe stream FPS using ffprobe (uncached)."""
+        """Actually probe stream FPS using ffprobe (uncached).
+
+        Uses low-latency flags to minimize probe time.
+        """
         try:
             cmd = [
                 "ffprobe",
                 "-v", "error",
+                # Low-latency flags - probe quickly without buffering
+                "-probesize", "32",
+                "-analyzeduration", "0",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=r_frame_rate",
                 "-of", "csv=p=0",
@@ -878,7 +884,8 @@ class VideoAnalyzer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            # Reduced timeout from 10s to 3s - if probe is slow, just use default
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
 
             if proc.returncode == 0 and stdout:
                 # Parse frame rate (format: "30/1" or "30000/1001")
@@ -1007,11 +1014,15 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False, dir=self.snapshot_dir) as vf:
                 video_path = vf.name
 
-            # Probe native FPS and calculate target based on user's percentage setting
-            native_fps = await self._get_stream_fps(stream_url)
-            target_fps = native_fps * (self.video_fps_percent / 100)
-            _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
-                         self.video_fps_percent, native_fps, target_fps)
+            # Skip FPS probing if using native FPS (100%) - saves 1-3 seconds of startup delay
+            target_fps = None
+            if self.video_fps_percent < 100:
+                native_fps = await self._get_stream_fps(stream_url)
+                target_fps = native_fps * (self.video_fps_percent / 100)
+                _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
+                             self.video_fps_percent, native_fps, target_fps)
+            else:
+                _LOGGER.debug("Recording at native FPS (100%%) - skipping FPS probe for faster start")
 
             # Build command based on stream type (RTSP vs HLS/HTTP)
             cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path, target_fps)
@@ -1105,11 +1116,15 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
 
-            # Probe native FPS and calculate target based on user's percentage setting
-            native_fps = await self._get_stream_fps(stream_url)
-            target_fps = native_fps * (self.video_fps_percent / 100)
-            _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
-                         self.video_fps_percent, native_fps, target_fps)
+            # Skip FPS probing if using native FPS (100%) - saves 1-3 seconds of startup delay
+            target_fps = None
+            if self.video_fps_percent < 100:
+                native_fps = await self._get_stream_fps(stream_url)
+                target_fps = native_fps * (self.video_fps_percent / 100)
+                _LOGGER.debug("Recording at %d%% of native %.1f fps = %.1f fps",
+                             self.video_fps_percent, native_fps, target_fps)
+            else:
+                _LOGGER.debug("Recording at native FPS (100%%) - skipping FPS probe for faster start")
 
             # Build and run video recording command - START IMMEDIATELY, no delays
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path, target_fps)
