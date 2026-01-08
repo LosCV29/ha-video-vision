@@ -898,31 +898,17 @@ class VideoAnalyzer:
         """Build ffmpeg command based on stream type (RTSP vs HLS/HTTP).
 
         Uses hardware acceleration if available (NVENC, QuickSync, VA-API, VideoToolbox).
-        Optimized for minimal latency based on Frigate project's proven configurations.
         """
         # Base command
         cmd = ["ffmpeg", "-y"]
 
         # Add protocol-specific options BEFORE input (important for RTSP)
         if stream_url.startswith("rtsp://"):
-            # RTSP stream - aggressive low-latency settings
-            # Based on Frigate's optimizations: https://github.com/blakeblackshear/frigate/issues/5459
-            # Key insight: analyzeduration=1 works, analyzeduration=0 can fail
+            # RTSP stream - simple, proven flags (don't over-engineer!)
             cmd.extend([
                 "-rtsp_transport", "tcp",
-                # Generate timestamps from system clock - improves seekability
-                # See: https://medium.com/@tom.humph/saving-rtsp-camera-streams-with-ffmpeg-baab7e80d767
-                "-use_wallclock_as_timestamps", "1",
-                # Minimal analysis - 1 microsecond (not 0, which can fail)
-                "-analyzeduration", "1",
-                # Minimal probe size - 32 bytes is too aggressive, use 32KB
-                "-probesize", "32000",
-                # No buffering, generate PTS, discard corrupt frames
-                "-fflags", "+nobuffer+genpts+discardcorrupt",
-                # Low delay decoding
+                "-fflags", "+nobuffer",
                 "-flags", "low_delay",
-                # Clean timestamp handling
-                "-avoid_negative_ts", "make_zero",
             ])
         # For HLS/HTTP streams, no special options needed
 

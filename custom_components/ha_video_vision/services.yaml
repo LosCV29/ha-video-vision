@@ -37,7 +37,7 @@ analyze_camera:
         boolean:
     facial_recognition_frame_position:
       name: Facial Recognition Frame Position
-      description: Which frame to use for facial recognition (0-100%). SEPARATE from notification image. Use LOW values (10-30%) to capture faces early before people leave. Due to RTSP keyframe delay, recording starts 1-2 seconds after trigger. If not set, uses the same frame as the notification.
+      description: Which frame to use for facial recognition (0-100%). SEPARATE from notification image. If not set, uses the same frame as the notification.
       required: false
       selector:
         number:
@@ -54,7 +54,7 @@ analyze_camera:
         boolean:
     frame_position:
       name: Notification Frame Position
-      description: Which frame from the video to use for the notification image (0-100%). 0% = first frame, 50% = middle, 100% = last. IMPORTANT - Due to RTSP keyframe delay, recording starts 1-2 seconds after trigger. Use LOW values (0-20%) if people walk away quickly. Default 20%.
+      description: Which frame from the video to use for the notification image (0-100%). 0% = first frame, 50% = middle, 100% = last frame.
       required: false
       selector:
         number:

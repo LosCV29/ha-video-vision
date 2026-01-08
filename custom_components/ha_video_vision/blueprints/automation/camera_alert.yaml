@@ -100,8 +100,8 @@ blueprint:
 
     frame_position:
       name: "Notification Frame Position (%)"
-      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame. IMPORTANT: Due to RTSP keyframe delay, recording starts 1-2 seconds after trigger. Use LOW values (0-20%) if people walk away quickly. Use 50% only if people linger at the camera."
-      default: 20
+      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame."
+      default: 50
       selector:
         number:
           min: 0
@@ -119,8 +119,8 @@ blueprint:
 
     facial_recognition_frame_position:
       name: "Facial Recognition Frame Position (%)"
-      description: "Which frame to use for facial recognition. SEPARATE from notification image. Use LOW values (10-30%) to capture faces early before people turn away. Higher values only work if people linger facing the camera. Due to keyframe delay, 0% may still be 1-2 seconds after trigger."
-      default: 20
+      description: "Which frame to use for facial recognition. SEPARATE from notification image. Use 50% (middle) or higher to capture faces after people have walked closer to the camera."
+      default: 50
       selector:
         number:
           min: 0
