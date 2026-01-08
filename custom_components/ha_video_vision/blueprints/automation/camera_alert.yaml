@@ -237,10 +237,9 @@ action:
                       # Priority
                       ttl: 0
                       priority: high
-                      # Android - bigText style prevents text cutoff
+                      # Android
                       channel: "ha_video_vision"
                       sticky: true
-                      style: big_text
                       # iOS
                       attachment:
                         url: "{{ result.snapshot_url }}"
