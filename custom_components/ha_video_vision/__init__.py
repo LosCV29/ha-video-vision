@@ -1025,10 +1025,10 @@ class VideoAnalyzer:
             prompt = user_query
         else:
             prompt = (
-                "Describe what you see in this camera feed. "
-                "Only mention people if you clearly see them - do not assume or guess. "
-                "Note any activity, vehicles, or notable events. "
-                "Be concise (2-3 sentences). Say 'no activity' if nothing notable is happening."
+                "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
+                "Report ANY people visible - even if small, distant, partially obscured, or at the edges. "
+                "Also report moving vehicles. For people, describe their location and actions. "
+                "Be concise (2-3 sentences). Say 'no activity' only if absolutely nothing is present."
             )
 
         # OPTIMIZATION: Run AI analysis and snapshot saves in PARALLEL
