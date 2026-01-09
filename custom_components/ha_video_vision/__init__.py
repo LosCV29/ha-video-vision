@@ -1020,10 +1020,20 @@ class VideoAnalyzer:
             entity_id, duration, frame_position, facial_recognition_frame_position
         )
 
-        # Prepare prompt
+        # Prepare prompt - voice checks get a natural, conversational wrapper
+        is_voice_check = bool(user_query)
         if user_query:
-            prompt = user_query
+            # Voice check: wrap with instructions for natural, personal response
+            prompt = (
+                f"The user asked to check their '{friendly_name}' camera. "
+                f"Describe what you see in 2-3 natural sentences as their personal home security assistant. "
+                f"Start with something like 'Your {friendly_name} shows...' or 'The {friendly_name} shows...'. "
+                f"Be conversational and helpful. Focus on what matters: people, vehicles, activity, or if it's all clear. "
+                f"Do NOT mention: frames, timestamps, lens distortion, image quality, camera angles, or technical details. "
+                f"Just describe the scene naturally like you're telling a friend what you see."
+            )
         else:
+            # Motion alert: use technical prompt for detection accuracy
             prompt = (
                 "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
                 "Report ANY people visible - even if small, distant, partially obscured, or at the edges. "
@@ -1048,7 +1058,7 @@ class VideoAnalyzer:
             )
 
         # Send to AI provider (snapshots save in background)
-        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt)
+        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt, is_voice_check)
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
 
@@ -1091,23 +1101,27 @@ class VideoAnalyzer:
         }
 
     async def _analyze_with_provider(
-        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str
+        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
+        is_voice_check: bool = False
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
+
+        Args:
+            is_voice_check: If True, use conversational system prompt for natural responses.
 
         Returns: (description, provider_used)
         """
         # Get provider settings
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
 
-        _LOGGER.debug("Sending to AI: %s", effective_provider)
+        _LOGGER.debug("Sending to AI: %s (voice_check=%s)", effective_provider, is_voice_check)
 
         if effective_provider == PROVIDER_GOOGLE:
-            result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
+            result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key, is_voice_check)
         elif effective_provider == PROVIDER_OPENROUTER:
-            result = await self._analyze_openrouter(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
+            result = await self._analyze_openrouter(video_bytes, frame_bytes, prompt, effective_model, effective_api_key, is_voice_check)
         elif effective_provider == PROVIDER_LOCAL:
-            result = await self._analyze_local(video_bytes, frame_bytes, prompt)
+            result = await self._analyze_local(video_bytes, frame_bytes, prompt, is_voice_check)
         else:
             result = "Unknown provider configured"
 
@@ -1115,7 +1129,7 @@ class VideoAnalyzer:
 
     async def _analyze_google(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        model: str = None, api_key: str = None
+        model: str = None, api_key: str = None, is_voice_check: bool = False
     ) -> str:
         """Analyze using Google Gemini - VIDEO ONLY."""
         # VIDEO ONLY - This integration focuses on video analysis
@@ -1144,14 +1158,24 @@ class VideoAnalyzer:
                     "data": video_b64
                 }
             })
-            
-            # System instruction to prevent hallucination of identities
-            system_instruction = (
-                "You are a security camera analyst. Describe ONLY what you can actually see. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
-            )
+
+            # System instruction - conversational for voice checks, technical for motion alerts
+            if is_voice_check:
+                system_instruction = (
+                    "You are a friendly home security assistant. Describe what you see naturally and conversationally, "
+                    "like you're telling the homeowner what's happening at their property. "
+                    "Focus on people, vehicles, packages, pets, or notable activity. "
+                    "If nothing is happening, reassure them that everything looks normal. "
+                    "NEVER mention technical details like frames, timestamps, resolution, lens distortion, or camera angles. "
+                    "NEVER identify specific people by name - just describe them naturally (a person, someone, a man/woman, etc.)."
+                )
+            else:
+                system_instruction = (
+                    "You are a security camera analyst. Describe ONLY what you can actually see. "
+                    "NEVER identify or name specific people. NEVER guess identities. "
+                    "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                    "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
+                )
 
             payload = {
                 "contents": [{"parts": parts}],
@@ -1209,7 +1233,7 @@ class VideoAnalyzer:
 
     async def _analyze_openrouter(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        model: str = None, api_key: str = None
+        model: str = None, api_key: str = None, is_voice_check: bool = False
     ) -> str:
         """Analyze using OpenRouter - VIDEO ONLY."""
         # VIDEO ONLY - This integration focuses on video analysis
@@ -1254,13 +1278,23 @@ class VideoAnalyzer:
 
             content.append({"type": "text", "text": prompt})
 
-            # System message to prevent hallucination of identities
-            system_message = (
-                "You are a security camera analyst. Describe ONLY what you can actually see. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
-            )
+            # System message - conversational for voice checks, technical for motion alerts
+            if is_voice_check:
+                system_message = (
+                    "You are a friendly home security assistant. Describe what you see naturally and conversationally, "
+                    "like you're telling the homeowner what's happening at their property. "
+                    "Focus on people, vehicles, packages, pets, or notable activity. "
+                    "If nothing is happening, reassure them that everything looks normal. "
+                    "NEVER mention technical details like frames, timestamps, resolution, lens distortion, or camera angles. "
+                    "NEVER identify specific people by name - just describe them naturally (a person, someone, a man/woman, etc.)."
+                )
+            else:
+                system_message = (
+                    "You are a security camera analyst. Describe ONLY what you can actually see. "
+                    "NEVER identify or name specific people. NEVER guess identities. "
+                    "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                    "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
+                )
 
             payload = {
                 "model": model,
@@ -1301,7 +1335,7 @@ class VideoAnalyzer:
             _LOGGER.error("OpenRouter analysis error: %s", e)
             return f"Analysis error: {str(e)}"
 
-    async def _analyze_local(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str) -> str:
+    async def _analyze_local(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, is_voice_check: bool = False) -> str:
         """Analyze using local vLLM endpoint - VIDEO preferred, image fallback."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
@@ -1328,15 +1362,25 @@ class VideoAnalyzer:
 
             content.append({"type": "text", "text": prompt})
 
-            # System message to prevent hallucination - CRITICAL for accurate responses
-            system_message = (
-                "You are a security camera analyst. Describe ONLY what you can actually see in the video/image. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is. "
-                "If you don't see any people, say so clearly. Do NOT hallucinate or imagine people who aren't there. "
-                "Be accurate and conservative - only report what is clearly visible."
-            )
+            # System message - conversational for voice checks, technical for motion alerts
+            if is_voice_check:
+                system_message = (
+                    "You are a friendly home security assistant. Describe what you see naturally and conversationally, "
+                    "like you're telling the homeowner what's happening at their property. "
+                    "Focus on people, vehicles, packages, pets, or notable activity. "
+                    "If nothing is happening, reassure them that everything looks normal. "
+                    "NEVER mention technical details like frames, timestamps, resolution, lens distortion, or camera angles. "
+                    "NEVER identify specific people by name - just describe them naturally (a person, someone, a man/woman, etc.)."
+                )
+            else:
+                system_message = (
+                    "You are a security camera analyst. Describe ONLY what you can actually see in the video/image. "
+                    "NEVER identify or name specific people. NEVER guess identities. "
+                    "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                    "Do not make up names, do not say 'the homeowner', do not assume who anyone is. "
+                    "If you don't see any people, say so clearly. Do NOT hallucinate or imagine people who aren't there. "
+                    "Be accurate and conservative - only report what is clearly visible."
+                )
 
             payload = {
                 "model": self.vllm_model,
