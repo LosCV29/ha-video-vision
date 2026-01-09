@@ -1020,9 +1020,25 @@ class VideoAnalyzer:
             entity_id, duration, frame_position, facial_recognition_frame_position
         )
 
-        # Prepare prompt - voice checks get a natural, conversational wrapper
-        is_voice_check = bool(user_query)
+        # Prepare prompt - detect if this is a voice check vs blueprint/automation prompt
+        # Voice checks are short commands like "check the back yard"
+        # Blueprint prompts are detailed instructions that should be used as-is
+        is_voice_check = False
         if user_query:
+            query_lower = user_query.lower().strip()
+            # Voice check indicators: short query with simple check/look commands
+            voice_keywords = ["check", "show", "look", "see", "what's", "whats", "how's", "hows", "status"]
+            is_short_query = len(user_query) < 100
+            has_voice_keyword = any(kw in query_lower for kw in voice_keywords)
+            # Blueprint prompts typically have: "describe", "report", "sentences", or are long detailed instructions
+            is_detailed_prompt = len(user_query) > 150 or "sentences" in query_lower or "report all" in query_lower
+
+            is_voice_check = is_short_query and has_voice_keyword and not is_detailed_prompt
+
+        if user_query and not is_voice_check:
+            # Blueprint/automation prompt - use as-is
+            prompt = user_query
+        elif is_voice_check:
             # Voice check: wrap with instructions for rich, descriptive personal response
             prompt = (
                 f"The user asked to check their '{friendly_name}' camera. "
@@ -1043,7 +1059,7 @@ class VideoAnalyzer:
                 f"or any technical/camera terminology. Just describe what you see as if looking out a window."
             )
         else:
-            # Motion alert: use technical prompt for detection accuracy
+            # No query provided - use default motion alert prompt
             prompt = (
                 "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
                 "Report ANY people visible - even if small, distant, partially obscured, or at the edges. "
