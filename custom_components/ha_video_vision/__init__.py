@@ -350,12 +350,14 @@ class VideoAnalyzer:
     """Class to handle video analysis with auto-discovered cameras."""
 
     CAMERA_CACHE_TTL = 300  # 5 minutes
+    STREAM_URL_CACHE_TTL = 60  # 1 minute - stream URLs can change/expire
 
     def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
         """Initialize the analyzer."""
         self.hass = hass
         self._session = async_get_clientsession(hass)
         self._camera_cache: tuple[list[dict], float] | None = None
+        self._stream_url_cache: dict[str, tuple[str | None, float]] = {}  # entity_id -> (url, timestamp)
         self.update_config(config)
 
     def update_config(self, config: dict[str, Any]) -> None:
@@ -652,13 +654,31 @@ class VideoAnalyzer:
 
         For cloud cameras (Ring, Nest, etc.), this may require activating the stream first.
         Tries multiple methods to obtain a valid stream URL.
+        Uses caching to speed up repeated requests.
         """
+        import time
+
+        # Check cache first for speed
+        if entity_id in self._stream_url_cache:
+            cached_url, cached_time = self._stream_url_cache[entity_id]
+            if time.time() - cached_time < self.STREAM_URL_CACHE_TTL:
+                if cached_url:
+                    _LOGGER.debug("Using cached stream URL for %s", entity_id)
+                    return cached_url
+                # Don't use cached None - retry to see if stream is now available
+
+        # Helper to cache and return URL
+        def _cache_and_return(url: str) -> str:
+            import time
+            self._stream_url_cache[entity_id] = (url, time.time())
+            return url
+
         # Method 1: Standard stream source retrieval
         try:
             stream_url = await async_get_stream_source(self.hass, entity_id)
             if stream_url:
                 _LOGGER.debug("Got stream URL for %s via async_get_stream_source", entity_id)
-                return stream_url
+                return _cache_and_return(stream_url)
         except Exception as e:
             _LOGGER.debug("async_get_stream_source failed for %s: %s", entity_id, e)
 
@@ -672,7 +692,7 @@ class VideoAnalyzer:
                     stream_source = state.attributes.get(attr_name)
                     if stream_source and stream_source.startswith("rtsp://"):
                         _LOGGER.debug("Got stream URL for %s from %s attribute", entity_id, attr_name)
-                        return stream_source
+                        return _cache_and_return(stream_source)
 
                 # Check for frontend_stream_type - indicates streaming capability
                 stream_type = state.attributes.get("frontend_stream_type")
@@ -706,7 +726,7 @@ class VideoAnalyzer:
                             "Got stream URL for %s from ring-mqtt info sensor %s",
                             entity_id, sensor_id
                         )
-                        return stream_source
+                        return _cache_and_return(stream_source)
         except Exception as e:
             _LOGGER.debug("ring-mqtt info sensor check failed for %s: %s", entity_id, e)
 
@@ -725,13 +745,13 @@ class VideoAnalyzer:
                         {"entity_id": entity_id},
                         blocking=True,
                     )
-                    # Wait a moment for stream to initialize
-                    await asyncio.sleep(2)
+                    # Brief wait for stream to initialize (reduced for speed)
+                    await asyncio.sleep(1)
                     # Try to get stream URL again
                     stream_url = await async_get_stream_source(self.hass, entity_id)
                     if stream_url:
                         _LOGGER.debug("Got stream URL for %s after activation", entity_id)
-                        return stream_url
+                        return _cache_and_return(stream_url)
         except Exception as e:
             _LOGGER.debug("Camera activation attempt failed for %s: %s", entity_id, e)
 
@@ -745,11 +765,24 @@ class VideoAnalyzer:
         return None
 
     async def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
-        """Build simple ffmpeg command."""
+        """Build ffmpeg command with low-latency flags for faster recording start."""
         cmd = ["ffmpeg", "-y"]
 
+        # Low-latency input flags - reduces time to first frame
         if stream_url.startswith("rtsp://"):
-            cmd.extend(["-rtsp_transport", "tcp"])
+            cmd.extend([
+                "-rtsp_transport", "tcp",
+                "-fflags", "nobuffer",          # Reduce buffering delay
+                "-flags", "low_delay",          # Low delay decoding
+                "-probesize", "32",             # Minimal probing (faster start)
+                "-analyzeduration", "0",        # Skip stream analysis
+            ])
+        else:
+            # HTTP/HLS streams also benefit from reduced buffering
+            cmd.extend([
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+            ])
 
         cmd.extend([
             "-i", stream_url,
