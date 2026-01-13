@@ -41,6 +41,9 @@ from .const import (
     DEFAULT_SELECTED_CAMERAS,
     CONF_CAMERA_ALIASES,
     DEFAULT_CAMERA_ALIASES,
+    # Voice Scripts
+    CONF_VOICE_SCRIPTS,
+    DEFAULT_VOICE_SCRIPTS,
     # Video Settings
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
@@ -339,6 +342,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 "configure_local": "Configure Local vLLM",
                 "cameras": "Select Cameras",
                 "voice_aliases": "Voice Aliases",
+                "voice_scripts": "Voice Scripts",
                 "video_quality": "Video Settings",
                 "ai_settings": "AI Settings",
                 "facial_recognition": "Facial Recognition",
@@ -752,6 +756,52 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             }),
             description_placeholders={
                 "available_cameras": "\n".join(camera_hints) if camera_hints else "No cameras selected",
+            },
+        )
+
+    async def async_step_voice_scripts(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle voice-controlled script configuration."""
+        if user_input is not None:
+            scripts = {}
+            script_text = user_input.get("script_config", "")
+
+            for line in script_text.strip().split("\n"):
+                line = line.strip()
+                if not line or ":" not in line:
+                    continue
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    voice_name = parts[0].strip().lower()
+                    script_id = parts[1].strip()
+                    if voice_name and script_id:
+                        scripts[voice_name] = script_id
+
+            new_options = {**self._entry.options, CONF_VOICE_SCRIPTS: scripts}
+            return self.async_create_entry(title="", data=new_options)
+
+        current = {**self._entry.data, **self._entry.options}
+        scripts = current.get(CONF_VOICE_SCRIPTS, DEFAULT_VOICE_SCRIPTS)
+
+        script_lines = [f"{name}:{script}" for name, script in scripts.items()]
+        script_text = "\n".join(script_lines) if script_lines else ""
+
+        # Auto-discover available scripts
+        script_hints = []
+        for state in self.hass.states.async_all("script"):
+            friendly = state.attributes.get("friendly_name", state.entity_id)
+            script_hints.append(f"{state.entity_id} ({friendly})")
+
+        return self.async_show_form(
+            step_id="voice_scripts",
+            data_schema=vol.Schema({
+                vol.Optional("script_config", default=script_text): selector.TextSelector(
+                    selector.TextSelectorConfig(multiline=True)
+                ),
+            }),
+            description_placeholders={
+                "available_scripts": "\n".join(script_hints) if script_hints else "No scripts found",
             },
         )
 

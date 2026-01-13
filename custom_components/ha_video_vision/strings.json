@@ -48,6 +48,7 @@
           "configure_local": "Configure Local vLLM",
           "cameras": "Select Cameras",
           "voice_aliases": "Voice Aliases",
+          "voice_scripts": "Voice Scripts",
           "video_quality": "Video Quality",
           "ai_settings": "AI Settings",
           "facial_recognition": "Facial Recognition",
@@ -115,6 +116,13 @@
         "description": "Map simple voice names to cameras. One per line: alias:camera.entity_id\n\nExample:\nbackyard:camera.backyard_fluent\nfront porch:camera.front_porch\ndriveway:camera.driveway_cam\n\nYour cameras:\n{available_cameras}",
         "data": {
           "alias_config": "Voice Aliases (one per line)"
+        }
+      },
+      "voice_scripts": {
+        "title": "Voice Scripts",
+        "description": "Configure scripts to trigger by voice command. One per line: voice_name:script.entity_id\n\nExample:\npause tv:script.pause_tv\nmute receiver:script.mute_receiver\ngoodnight:script.goodnight_routine\n\nAvailable scripts:\n{available_scripts}",
+        "data": {
+          "script_config": "Voice Scripts (one per line)"
         }
       },
       "video_quality": {

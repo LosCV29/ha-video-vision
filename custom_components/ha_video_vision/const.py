@@ -70,6 +70,10 @@ DEFAULT_SELECTED_CAMERAS: Final = []
 CONF_CAMERA_ALIASES: Final = "camera_aliases"
 DEFAULT_CAMERA_ALIASES: Final = {}
 
+# Voice-controlled scripts (configured via UI for reliable triggering)
+CONF_VOICE_SCRIPTS: Final = "voice_scripts"
+DEFAULT_VOICE_SCRIPTS: Final = {}
+
 # =============================================================================
 # VIDEO SETTINGS
 # =============================================================================
