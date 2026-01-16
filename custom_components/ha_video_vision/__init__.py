@@ -745,8 +745,17 @@ class VideoAnalyzer:
         return None
 
     async def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
-        """Build simple ffmpeg command."""
+        """Build ffmpeg command with low-latency optimizations for instant recording."""
         cmd = ["ffmpeg", "-y"]
+
+        # LOW LATENCY FLAGS - minimize time before recording starts
+        # These reduce the ~1-2 second delay FFmpeg normally takes to probe the stream
+        cmd.extend([
+            "-fflags", "nobuffer",          # Don't buffer input - start immediately
+            "-flags", "low_delay",          # Low latency decoding mode
+            "-probesize", "32",             # Minimal probe size (bytes) - faster stream detection
+            "-analyzeduration", "0",        # Skip duration analysis - start recording NOW
+        ])
 
         if stream_url.startswith("rtsp://"):
             cmd.extend(["-rtsp_transport", "tcp"])
