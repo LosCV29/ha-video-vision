@@ -1025,11 +1025,13 @@ class VideoAnalyzer:
             prompt = user_query
         else:
             prompt = (
-                "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
-                "Report ANY people, animals, or pets visible - even if small, distant, partially obscured, or at the edges. "
-                "Also report moving vehicles. For people, describe their location and actions. "
-                "For animals, identify the type (dog, cat, etc.) and what they are doing. "
-                "Be concise (2-3 sentences). Say 'no activity' only if absolutely nothing is present."
+                "CRITICAL SECURITY TASK: You MUST detect ALL humans/people in this footage. "
+                "Scan EVERY frame of the video and ALL areas of each frame - center, edges, corners, background. "
+                "Look for: people (facing toward OR away from camera), partial bodies, silhouettes, shadows of people. "
+                "A person walking AWAY from camera is still a person - report them! "
+                "Also check for animals/pets and vehicles. "
+                "Describe what each person is doing and wearing. Be concise (2-3 sentences). "
+                "ONLY say 'no activity' if you are 100% certain no humans, animals, or vehicles appear in ANY frame."
             )
 
         # OPTIMIZATION: Run AI analysis and snapshot saves in PARALLEL
@@ -1051,6 +1053,24 @@ class VideoAnalyzer:
         # Send to AI provider (snapshots save in background)
         description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt)
 
+        # CRITICAL FIX: Fallback frame analysis if AI reports "no activity"
+        # This catches false negatives where the AI misses a person in the video
+        if description and "no activity" in description.lower() and frame_bytes:
+            _LOGGER.info("AI reported 'no activity' - performing fallback frame analysis for %s", friendly_name)
+            fallback_prompt = (
+                "IMPORTANT: A motion sensor triggered this camera. Look VERY carefully at this image. "
+                "Is there ANY person visible - even partially, from behind, at edges, or in shadows? "
+                "Look for: human silhouettes, body parts, people facing away, distant figures. "
+                "Also check for animals or vehicles. Describe what you see. "
+                "Only say 'no activity' if you are absolutely certain the frame is empty."
+            )
+            # Force frame-only analysis by passing None for video
+            fallback_description, _ = await self._analyze_with_provider(None, frame_bytes, fallback_prompt)
+            # Use fallback if it found something
+            if fallback_description and "no activity" not in fallback_description.lower():
+                _LOGGER.info("Fallback analysis found activity: %s", fallback_description[:100])
+                description = fallback_description
+
         _LOGGER.debug("Analysis complete for %s", friendly_name)
 
         # Wait for snapshot saves to complete (should already be done by now)
@@ -1067,10 +1087,18 @@ class VideoAnalyzer:
         # Expanded list to catch more variations of how the AI might describe people
         description_text = description or ""
         person_keywords = [
+            # Direct person terms
             "person", "people", "someone", "man", "woman", "child",
             "individual", "adult", "figure", "pedestrian", "walker",
-            "visitor", "delivery", "carrier", "walking", "standing",
-            "approaching", "leaving", "human", "resident", "guest"
+            "visitor", "delivery", "carrier", "human", "resident", "guest",
+            # Actions that imply a person
+            "walking", "standing", "approaching", "leaving", "entering",
+            "exiting", "moving", "running", "jogging", "sitting",
+            # Body-related (implies person visible)
+            "silhouette", "shadow", "back", "wearing", "dressed",
+            # Additional descriptors
+            "worker", "courier", "postman", "mailman", "driver",
+            "stranger", "neighbor", "kid", "teen", "teenager", "elderly"
         ]
         person_detected = any(
             word in description_text.lower()
@@ -1131,9 +1159,9 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
         model: str = None, api_key: str = None
     ) -> str:
-        """Analyze using Google Gemini - VIDEO ONLY."""
-        # VIDEO ONLY - This integration focuses on video analysis
-        if not video_bytes:
+        """Analyze using Google Gemini - VIDEO preferred, falls back to frame."""
+        # Need either video or frame
+        if not video_bytes and not frame_bytes:
             return (
                 "No video stream available for this camera. "
                 "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
@@ -1150,14 +1178,25 @@ class VideoAnalyzer:
 
             parts = [{"text": prompt}]
 
-            # VIDEO ONLY - no image analysis
-            video_b64 = base64.b64encode(video_bytes).decode()
-            parts.insert(0, {
-                "inline_data": {
-                    "mime_type": "video/mp4",
-                    "data": video_b64
-                }
-            })
+            # Prefer video, fall back to frame for fallback analysis
+            if video_bytes:
+                video_b64 = base64.b64encode(video_bytes).decode()
+                parts.insert(0, {
+                    "inline_data": {
+                        "mime_type": "video/mp4",
+                        "data": video_b64
+                    }
+                })
+            elif frame_bytes:
+                # Frame-only analysis (used for fallback when video returns "no activity")
+                _LOGGER.debug("Using frame-only analysis (fallback mode)")
+                frame_b64 = base64.b64encode(frame_bytes).decode()
+                parts.insert(0, {
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": frame_b64
+                    }
+                })
             
             # System instruction to prevent hallucination of identities
             system_instruction = (
@@ -1225,9 +1264,9 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
         model: str = None, api_key: str = None
     ) -> str:
-        """Analyze using OpenRouter - VIDEO ONLY."""
-        # VIDEO ONLY - This integration focuses on video analysis
-        if not video_bytes:
+        """Analyze using OpenRouter - VIDEO preferred, falls back to frame."""
+        # Need either video or frame
+        if not video_bytes and not frame_bytes:
             return (
                 "No video stream available for this camera. "
                 "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
@@ -1257,14 +1296,25 @@ class VideoAnalyzer:
 
             content = []
 
-            # VIDEO ONLY - no image analysis
-            video_b64 = base64.b64encode(video_bytes).decode()
-            content.append({
-                "type": "video_url",
-                "video_url": {
-                    "url": f"data:video/mp4;base64,{video_b64}"
-                }
-            })
+            # Prefer video, fall back to frame for fallback analysis
+            if video_bytes:
+                video_b64 = base64.b64encode(video_bytes).decode()
+                content.append({
+                    "type": "video_url",
+                    "video_url": {
+                        "url": f"data:video/mp4;base64,{video_b64}"
+                    }
+                })
+            elif frame_bytes:
+                # Frame-only analysis (used for fallback when video returns "no activity")
+                _LOGGER.debug("Using frame-only analysis (fallback mode)")
+                frame_b64 = base64.b64encode(frame_bytes).decode()
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{frame_b64}"
+                    }
+                })
 
             content.append({"type": "text", "text": prompt})
 
