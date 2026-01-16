@@ -744,36 +744,6 @@ class VideoAnalyzer:
         )
         return None
 
-    def _reolink_playback_url(self, stream_url: str, pre_buffer_seconds: int = 5) -> str:
-        """Convert Reolink live stream URL to playback URL with pre-buffer.
-
-        Reolink cameras support playback from SD card recording via RTSP.
-        By adding ?starttime=TIMESTAMP, we can request footage from X seconds ago,
-        capturing what happened BEFORE the motion trigger.
-
-        Args:
-            stream_url: Live RTSP stream URL
-            pre_buffer_seconds: How many seconds before now to start playback
-
-        Returns:
-            Modified URL with starttime parameter for playback
-        """
-        # Only modify Reolink URLs (check for common Reolink patterns)
-        if "192.168.68.86" not in stream_url:
-            return stream_url
-
-        # Calculate start time (X seconds ago)
-        from datetime import datetime, timedelta
-        start_time = datetime.now() - timedelta(seconds=pre_buffer_seconds)
-        timestamp = start_time.strftime("%Y%m%dT%H%M%S")
-
-        # Remove any existing query parameters and add starttime
-        base_url = stream_url.split("?")[0]
-        playback_url = f"{base_url}?starttime={timestamp}"
-
-        _LOGGER.info("Reolink playback URL: requesting footage from %d seconds ago", pre_buffer_seconds)
-        return playback_url
-
     async def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
         """Build ffmpeg command with low-latency optimizations for instant recording."""
         cmd = ["ffmpeg", "-y"]
@@ -1037,10 +1007,6 @@ class VideoAnalyzer:
             _LOGGER.info("Cloud camera: %s - using snapshot mode", entity_id)
             frame_bytes = await self._get_camera_snapshot(entity_id, retries=3, delay=1.0, is_cloud_camera=True)
             return video_bytes, frame_bytes, None
-
-        # REOLINK PRE-BUFFER: Convert to playback URL to get footage from BEFORE the trigger
-        # This captures what happened 5 seconds ago, ensuring we never miss the person
-        stream_url = self._reolink_playback_url(stream_url, pre_buffer_seconds=5)
 
         video_path = None
         frame_path = None
