@@ -1014,28 +1014,29 @@ class VideoAnalyzer:
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         safe_name = entity_id.replace("camera.", "").replace(".", "_")
 
-        # CRITICAL: Take IMMEDIATE snapshot FIRST - captures what triggered the motion
-        # This happens BEFORE video recording starts to ensure we catch the person/activity
-        _LOGGER.debug("Taking immediate snapshot for %s", friendly_name)
-        immediate_snapshot = await self._get_camera_snapshot(entity_id)
-
-        # Start video recording and frame extraction IN PARALLEL with saving immediate snapshot
-        # This way we don't lose any time
+        # CRITICAL: Start video recording IMMEDIATELY - this is the first thing we do
+        # The recording captures what triggered the motion detection
+        _LOGGER.debug("Starting IMMEDIATE video recording for %s", friendly_name)
         video_task = asyncio.create_task(
             self._record_video_and_frames(
                 entity_id, duration, frame_position, facial_recognition_frame_position
             )
         )
 
-        # Save immediate snapshot while video records
+        # Take snapshot IN PARALLEL with video recording (for notification image)
+        # This doesn't delay the video - both happen simultaneously
+        snapshot_task = asyncio.create_task(self._get_camera_snapshot(entity_id))
+
+        # Wait for both to complete
+        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
+        immediate_snapshot = await snapshot_task
+
+        # Save the immediate snapshot for notification
         snapshot_path = None
         if immediate_snapshot:
             snapshot_path = await self._save_snapshot_async(immediate_snapshot, safe_name)
 
-        # Wait for video recording to complete
-        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
-
-        # Use immediate snapshot for notification, video frame for facial recognition if needed
+        # Use immediate snapshot for notification display
         frame_bytes = immediate_snapshot or video_frame_bytes
 
         # Prepare prompt
