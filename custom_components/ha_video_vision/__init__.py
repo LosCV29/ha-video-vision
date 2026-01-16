@@ -990,6 +990,103 @@ class VideoAnalyzer:
             _LOGGER.error("Failed to save snapshot: %s", e)
             return None
 
+    async def _record_video_with_url(
+        self, entity_id: str, stream_url: str | None, duration: int,
+        frame_position: int | None = None, facial_recognition_frame_position: int | None = None
+    ) -> tuple[bytes | None, bytes | None, bytes | None]:
+        """Record video with pre-fetched stream URL. ZERO lookup delay - FFmpeg starts immediately."""
+        video_bytes = None
+        frame_bytes = None
+        face_rec_frame_bytes = None
+
+        if frame_position is None:
+            frame_position = self.notification_frame_position
+
+        if not stream_url:
+            # Cloud camera - no RTSP stream available
+            _LOGGER.info("Cloud camera: %s - using snapshot mode", entity_id)
+            frame_bytes = await self._get_camera_snapshot(entity_id, retries=3, delay=1.0, is_cloud_camera=True)
+            return video_bytes, frame_bytes, None
+
+        video_path = None
+        frame_path = None
+        face_rec_frame_path = None
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as vf:
+                video_path = vf.name
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
+                frame_path = ff.name
+
+            # START FFMPEG IMMEDIATELY - stream URL already available
+            video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
+            video_proc = await asyncio.create_subprocess_exec(
+                *video_cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 10)
+
+            if video_proc.returncode != 0:
+                stderr_text = stderr.decode() if stderr else "No error output"
+                _LOGGER.error("FFmpeg failed (code %d) for %s: %s",
+                            video_proc.returncode, entity_id, stderr_text[:500])
+                raise RuntimeError(f"FFmpeg failed: {stderr_text[:200]}")
+
+            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+                async with aiofiles.open(video_path, 'rb') as f:
+                    video_bytes = await f.read()
+
+                # Extract frames in parallel
+                frame_time = duration * (frame_position / 100)
+                frame_cmd = [
+                    "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
+                    "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", frame_path
+                ]
+                frame_proc = await asyncio.create_subprocess_exec(
+                    *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+
+                face_rec_proc = None
+                if (facial_recognition_frame_position is not None and
+                    facial_recognition_frame_position != frame_position):
+                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as frf:
+                        face_rec_frame_path = frf.name
+                    face_rec_frame_time = duration * (facial_recognition_frame_position / 100)
+                    face_rec_cmd = [
+                        "ffmpeg", "-y", "-ss", str(face_rec_frame_time), "-i", video_path,
+                        "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", face_rec_frame_path
+                    ]
+                    face_rec_proc = await asyncio.create_subprocess_exec(
+                        *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )
+
+                await asyncio.wait_for(frame_proc.wait(), timeout=10)
+                if face_rec_proc:
+                    await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
+
+                if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
+                    async with aiofiles.open(frame_path, 'rb') as f:
+                        frame_bytes = await f.read()
+                if face_rec_frame_path and os.path.exists(face_rec_frame_path) and os.path.getsize(face_rec_frame_path) > 0:
+                    async with aiofiles.open(face_rec_frame_path, 'rb') as f:
+                        face_rec_frame_bytes = await f.read()
+
+            return video_bytes, frame_bytes, face_rec_frame_bytes
+
+        except Exception as e:
+            _LOGGER.error("Error recording video from %s: %s", entity_id, e)
+            fallback_frame = await self._get_camera_snapshot(entity_id)
+            return None, fallback_frame, None
+        finally:
+            for path in [video_path, frame_path, face_rec_frame_path]:
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = "",
         frame_position: int | None = None, facial_recognition_frame_position: int | None = None
@@ -1009,8 +1106,7 @@ class VideoAnalyzer:
         """
         duration = duration or self.video_duration
 
-        _LOGGER.debug("Analyzing %s with %s", camera_input, self.provider)
-
+        # SPEED: Find entity first (fast sync lookup)
         entity_id = self._find_camera_entity(camera_input)
         if not entity_id:
             available = ", ".join(self.selected_cameras) if self.selected_cameras else "None configured"
@@ -1019,26 +1115,32 @@ class VideoAnalyzer:
                 "error": f"Camera '{camera_input}' not found. Available: {available}"
             }
 
+        # SPEED: Start stream URL lookup AND snapshot capture IMMEDIATELY in parallel
+        # These are the two async operations that take time - do them simultaneously
+        _LOGGER.debug("Starting parallel stream URL + snapshot for %s", entity_id)
+        stream_url_task = asyncio.create_task(self._get_stream_url(entity_id))
+        snapshot_task = asyncio.create_task(self._get_camera_snapshot(entity_id))
+
+        # Get metadata while waiting (fast sync operations)
         state = self.hass.states.get(entity_id)
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         safe_name = entity_id.replace("camera.", "").replace(".", "_")
 
-        # CRITICAL: Start video recording IMMEDIATELY - this is the first thing we do
-        # The recording captures what triggered the motion detection
-        _LOGGER.debug("Starting IMMEDIATE video recording for %s", friendly_name)
+        # Wait for stream URL - we need this to start recording
+        stream_url = await stream_url_task
+
+        # NOW start video recording with the stream URL (FFmpeg starts immediately)
         video_task = asyncio.create_task(
-            self._record_video_and_frames(
-                entity_id, duration, frame_position, facial_recognition_frame_position
+            self._record_video_with_url(
+                entity_id, stream_url, duration, frame_position, facial_recognition_frame_position
             )
         )
 
-        # Take snapshot IN PARALLEL with video recording (for notification image)
-        # This doesn't delay the video - both happen simultaneously
-        snapshot_task = asyncio.create_task(self._get_camera_snapshot(entity_id))
-
-        # Wait for both to complete
-        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
+        # Wait for snapshot (should already be done or nearly done)
         immediate_snapshot = await snapshot_task
+
+        # Wait for video recording to complete
+        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
 
         # Save the immediate snapshot for notification
         snapshot_path = None
