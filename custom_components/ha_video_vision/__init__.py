@@ -543,7 +543,7 @@ class VideoAnalyzer:
         return None
 
     async def _get_camera_snapshot(
-        self, entity_id: str, retries: int = 3, delay: float = 1.0, is_cloud_camera: bool = False
+        self, entity_id: str, retries: int = 3, delay: float = 0.3, is_cloud_camera: bool = False
     ) -> bytes | None:
         """Get camera snapshot using HA's camera component with retry logic.
 
@@ -565,8 +565,8 @@ class VideoAnalyzer:
             try:
                 _LOGGER.debug("Sending wake-up snapshot request to cloud camera %s", entity_id)
                 await async_get_image(self.hass, entity_id)
-                # Brief pause to let the camera start processing
-                await asyncio.sleep(0.5)
+                # Minimal pause to let the camera start processing (optimized for speed)
+                await asyncio.sleep(0.2)
             except Exception as e:
                 _LOGGER.debug("Wake-up request for %s failed (non-critical): %s", entity_id, e)
 
@@ -725,8 +725,8 @@ class VideoAnalyzer:
                         {"entity_id": entity_id},
                         blocking=True,
                     )
-                    # Wait a moment for stream to initialize
-                    await asyncio.sleep(2)
+                    # Brief wait for stream to initialize (optimized for speed)
+                    await asyncio.sleep(0.5)
                     # Try to get stream URL again
                     stream_url = await async_get_stream_source(self.hass, entity_id)
                     if stream_url:
@@ -760,10 +760,19 @@ class VideoAnalyzer:
         if stream_url.startswith("rtsp://"):
             cmd.extend(["-rtsp_transport", "tcp"])
 
+        # Apply FPS reduction if configured (100% = full fps, 50% = half fps)
+        # Use fps filter to reduce frame rate for faster processing
+        fps_filter = ""
+        if self.video_fps_percent < 100:
+            # Target common frame rates based on percentage
+            # 100% = source fps, 50% = 15fps, 25% = 8fps
+            target_fps = max(8, int(30 * self.video_fps_percent / 100))
+            fps_filter = f"fps={target_fps},"
+
         cmd.extend([
             "-i", stream_url,
             "-t", str(duration),
-            "-vf", f"scale={self.video_width}:-2",
+            "-vf", f"{fps_filter}scale={self.video_width}:-2",
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "28",
