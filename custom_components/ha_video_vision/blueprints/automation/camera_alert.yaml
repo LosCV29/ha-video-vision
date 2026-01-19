@@ -154,7 +154,7 @@ variables:
   face_rec_frame_pos: !input facial_recognition_frame_position
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles whether moving or stationary
-  default_prompt: "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. Report ANY people visible - even if small, distant, partially obscured, or at the edges of frame. Also report moving vehicles. For people, describe their location in frame and what they're doing. Ignore parked cars and static structures. If absolutely no people or moving vehicles are present after thorough inspection, respond: 'No activity observed.' 2-3 sentences max."
+  default_prompt: "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. Report ANY people visible - even if small, distant, partially obscured, or at the edges of frame. Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. Ignore parked cars and static structures. Be concise (2-3 sentences)."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}
