@@ -47,6 +47,7 @@
           "configure_openrouter": "Configure OpenRouter",
           "configure_local": "Configure Local vLLM",
           "cameras": "Select Cameras",
+          "camera_context": "Camera Context",
           "voice_aliases": "Voice Aliases",
           "video_quality": "Video Quality",
           "ai_settings": "AI Settings",
@@ -117,6 +118,13 @@
           "alias_config": "Voice Aliases (one per line)"
         }
       },
+      "camera_context": {
+        "title": "Camera Context",
+        "description": "Add context about each camera's view to get more natural responses.\n\nThe AI will use this information to describe scenes naturally, like 'the neighbor is washing their car' instead of 'a person is near a vehicle'.\n\nFormat: camera.entity_id: followed by context lines\n\nExample:\ncamera.front_yard:\n  This camera faces the street\n  The house across the street belongs to the Johnsons\n  Their silver Ford F-150 is usually in their driveway\n  The neighbor to the right is the Smith family",
+        "data": {
+          "context_config": "Camera Contexts"
+        }
+      },
       "video_quality": {
         "title": "Video Quality",
         "description": "Configure recording and snapshot settings",
@@ -154,7 +162,8 @@
       }
     },
     "abort": {
-      "no_providers_configured": "No providers configured. Use the provider configuration options first."
+      "no_providers_configured": "No providers configured. Use the provider configuration options first.",
+      "no_cameras_selected": "No cameras selected. Please select cameras first in the 'Select Cameras' option."
     }
   }
 }

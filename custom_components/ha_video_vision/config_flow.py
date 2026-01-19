@@ -41,6 +41,8 @@ from .const import (
     DEFAULT_SELECTED_CAMERAS,
     CONF_CAMERA_ALIASES,
     DEFAULT_CAMERA_ALIASES,
+    CONF_CAMERA_CONTEXTS,
+    DEFAULT_CAMERA_CONTEXTS,
     # Video Settings
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
@@ -338,6 +340,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 "configure_openrouter": "Configure OpenRouter",
                 "configure_local": "Configure Local vLLM",
                 "cameras": "Select Cameras",
+                "camera_context": "Camera Context",
                 "voice_aliases": "Voice Aliases",
                 "video_quality": "Video Settings",
                 "ai_settings": "AI Settings",
@@ -752,6 +755,74 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             }),
             description_placeholders={
                 "available_cameras": "\n".join(camera_hints) if camera_hints else "No cameras selected",
+            },
+        )
+
+    async def async_step_camera_context(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle camera context configuration for natural responses."""
+        current = {**self._entry.data, **self._entry.options}
+        selected_cameras = current.get(CONF_SELECTED_CAMERAS, [])
+        camera_contexts = current.get(CONF_CAMERA_CONTEXTS, DEFAULT_CAMERA_CONTEXTS)
+
+        if not selected_cameras:
+            return self.async_abort(reason="no_cameras_selected")
+
+        if user_input is not None:
+            # Parse the context text into a dictionary
+            new_contexts = {}
+            context_text = user_input.get("context_config", "")
+
+            current_camera = None
+            current_context_lines = []
+
+            for line in context_text.split("\n"):
+                # Check if this is a camera header (starts with camera.)
+                stripped = line.strip()
+                if stripped.startswith("camera.") and stripped.endswith(":"):
+                    # Save previous camera context if any
+                    if current_camera and current_context_lines:
+                        new_contexts[current_camera] = "\n".join(current_context_lines).strip()
+                    # Start new camera
+                    current_camera = stripped.rstrip(":")
+                    current_context_lines = []
+                elif current_camera and stripped:
+                    # Add context line for current camera
+                    current_context_lines.append(stripped)
+
+            # Save last camera context
+            if current_camera and current_context_lines:
+                new_contexts[current_camera] = "\n".join(current_context_lines).strip()
+
+            new_options = {**self._entry.options, CONF_CAMERA_CONTEXTS: new_contexts}
+            return self.async_create_entry(title="", data=new_options)
+
+        # Build current context text from saved contexts
+        context_lines = []
+        for entity_id in selected_cameras:
+            state = self.hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+            context_lines.append(f"{entity_id}:")
+            if entity_id in camera_contexts:
+                # Add existing context indented
+                for ctx_line in camera_contexts[entity_id].split("\n"):
+                    context_lines.append(f"  {ctx_line}")
+            else:
+                context_lines.append(f"  # Add context for {friendly_name}")
+            context_lines.append("")  # Empty line between cameras
+
+        context_text = "\n".join(context_lines)
+
+        return self.async_show_form(
+            step_id="camera_context",
+            data_schema=vol.Schema({
+                vol.Optional("context_config", default=context_text): selector.TextSelector(
+                    selector.TextSelectorConfig(multiline=True)
+                ),
+            }),
+            description_placeholders={
+                "camera_count": str(len(selected_cameras)),
             },
         )
 
