@@ -1171,9 +1171,9 @@ class VideoAnalyzer:
             prompt = (
                 "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
                 "Report ANY people, animals, or pets visible - even if small, distant, partially obscured, or at the edges. "
-                "Also report moving vehicles. For people, describe their location and actions. "
+                "Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. "
                 "For animals, identify the type (dog, cat, etc.) and what they are doing. "
-                "Be concise (2-3 sentences). Say 'no activity' only if absolutely nothing is present."
+                "Be concise (2-3 sentences)."
             )
 
         # Save facial recognition frame separately if it exists and differs from notification frame
