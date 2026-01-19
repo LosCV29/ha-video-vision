@@ -70,6 +70,10 @@ DEFAULT_SELECTED_CAMERAS: Final = []
 CONF_CAMERA_ALIASES: Final = "camera_aliases"
 DEFAULT_CAMERA_ALIASES: Final = {}
 
+# Camera context for natural responses (per-camera scene descriptions)
+CONF_CAMERA_CONTEXTS: Final = "camera_contexts"
+DEFAULT_CAMERA_CONTEXTS: Final = {}
+
 # =============================================================================
 # VIDEO SETTINGS
 # =============================================================================

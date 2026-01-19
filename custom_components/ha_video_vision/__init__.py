@@ -47,6 +47,8 @@ from .const import (
     DEFAULT_SELECTED_CAMERAS,
     CONF_CAMERA_ALIASES,
     DEFAULT_CAMERA_ALIASES,
+    CONF_CAMERA_CONTEXTS,
+    DEFAULT_CAMERA_CONTEXTS,
     # Video
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
@@ -391,6 +393,9 @@ class VideoAnalyzer:
 
         # Voice aliases for easy voice commands
         self.camera_aliases = config.get(CONF_CAMERA_ALIASES, DEFAULT_CAMERA_ALIASES)
+
+        # Camera contexts for natural responses
+        self.camera_contexts = config.get(CONF_CAMERA_CONTEXTS, DEFAULT_CAMERA_CONTEXTS)
 
         # Video settings
         self.video_duration = config.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION)
@@ -1180,7 +1185,7 @@ class VideoAnalyzer:
 
         # Send to AI provider (face_rec snapshot saves in background)
         # Note: snapshot_path already saved from immediate snapshot above
-        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt)
+        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt, entity_id)
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
 
@@ -1230,8 +1235,39 @@ class VideoAnalyzer:
             "default_provider": self.provider,
         }
 
+    def _build_system_prompt(self, entity_id: str) -> str:
+        """Build a context-aware system prompt for the given camera.
+
+        If camera context is configured, include it in the system prompt
+        to enable more natural, personalized responses.
+        """
+        # Get camera context if available
+        camera_context = self.camera_contexts.get(entity_id, "")
+
+        if camera_context:
+            # Context-aware prompt that uses the provided information
+            return (
+                "You are a helpful home security assistant analyzing camera footage. "
+                "Use the following context about this camera's view to provide natural, "
+                "personalized descriptions. You may use the names and descriptions provided.\n\n"
+                f"CAMERA CONTEXT:\n{camera_context}\n\n"
+                "Based on this context, describe what you see naturally. For example, if you see "
+                "someone matching a described neighbor near their described vehicle, you can say "
+                "'the neighbor is by their truck' instead of 'a person is near a vehicle'. "
+                "Be accurate - only use context when it clearly matches what you observe. "
+                "If unsure, describe what you see without assuming identities."
+            )
+        else:
+            # Default prompt without context (original behavior)
+            return (
+                "You are a security camera analyst. Describe ONLY what you can actually see. "
+                "NEVER identify or name specific people. NEVER guess identities. "
+                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
+                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
+            )
+
     async def _analyze_with_provider(
-        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str
+        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, entity_id: str = ""
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
 
@@ -1240,14 +1276,17 @@ class VideoAnalyzer:
         # Get provider settings
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
 
+        # Build context-aware system prompt
+        system_prompt = self._build_system_prompt(entity_id)
+
         _LOGGER.debug("Sending to AI: %s", effective_provider)
 
         if effective_provider == PROVIDER_GOOGLE:
-            result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
+            result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key, system_prompt)
         elif effective_provider == PROVIDER_OPENROUTER:
-            result = await self._analyze_openrouter(video_bytes, frame_bytes, prompt, effective_model, effective_api_key)
+            result = await self._analyze_openrouter(video_bytes, frame_bytes, prompt, effective_model, effective_api_key, system_prompt)
         elif effective_provider == PROVIDER_LOCAL:
-            result = await self._analyze_local(video_bytes, frame_bytes, prompt)
+            result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt)
         else:
             result = "Unknown provider configured"
 
@@ -1255,7 +1294,7 @@ class VideoAnalyzer:
 
     async def _analyze_google(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        model: str = None, api_key: str = None
+        model: str = None, api_key: str = None, system_prompt: str = ""
     ) -> str:
         """Analyze using Google Gemini - VIDEO ONLY."""
         # VIDEO ONLY - This integration focuses on video analysis
@@ -1284,18 +1323,10 @@ class VideoAnalyzer:
                     "data": video_b64
                 }
             })
-            
-            # System instruction to prevent hallucination of identities
-            system_instruction = (
-                "You are a security camera analyst. Describe ONLY what you can actually see. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
-            )
 
             payload = {
                 "contents": [{"parts": parts}],
-                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "systemInstruction": {"parts": [{"text": system_prompt}]},
                 "generationConfig": {
                     "temperature": self.vllm_temperature,
                     "maxOutputTokens": self.vllm_max_tokens,
@@ -1349,7 +1380,7 @@ class VideoAnalyzer:
 
     async def _analyze_openrouter(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        model: str = None, api_key: str = None
+        model: str = None, api_key: str = None, system_prompt: str = ""
     ) -> str:
         """Analyze using OpenRouter - VIDEO ONLY."""
         # VIDEO ONLY - This integration focuses on video analysis
@@ -1394,18 +1425,10 @@ class VideoAnalyzer:
 
             content.append({"type": "text", "text": prompt})
 
-            # System message to prevent hallucination of identities
-            system_message = (
-                "You are a security camera analyst. Describe ONLY what you can actually see. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
-            )
-
             payload = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": system_message},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": content}
                 ],
                 "max_tokens": self.vllm_max_tokens,
@@ -1441,7 +1464,7 @@ class VideoAnalyzer:
             _LOGGER.error("OpenRouter analysis error: %s", e)
             return f"Analysis error: {str(e)}"
 
-    async def _analyze_local(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str) -> str:
+    async def _analyze_local(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, system_prompt: str = "") -> str:
         """Analyze using local vLLM endpoint - VIDEO preferred, image fallback."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
@@ -1468,20 +1491,10 @@ class VideoAnalyzer:
 
             content.append({"type": "text", "text": prompt})
 
-            # System message to prevent hallucination - CRITICAL for accurate responses
-            system_message = (
-                "You are a security camera analyst. Describe ONLY what you can actually see in the video/image. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is. "
-                "If you don't see any people, say so clearly. Do NOT hallucinate or imagine people who aren't there. "
-                "Be accurate and conservative - only report what is clearly visible."
-            )
-
             payload = {
                 "model": self.vllm_model,
                 "messages": [
-                    {"role": "system", "content": system_message},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": content}
                 ],
                 "max_tokens": self.vllm_max_tokens,
