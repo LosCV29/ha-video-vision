@@ -183,10 +183,11 @@ action:
               notification_title: "{{ custom_title if custom_title else result.friendly_name }}"
               # Include facial recognition results in message if available
               notification_message: >
-                {% set desc = result.description if result.description else 'Motion detected on camera' %}
-                {% set face_rec = result.get('face_recognition', {}) %}
-                {% if face_rec.get('success') and face_rec.get('summary') and face_rec.get('summary') != 'No known faces' %}
-                  {{ face_rec.summary }} - {{ desc }}
+                {% set desc = result.description | default('Motion detected on camera') %}
+                {% set face_rec = result.face_recognition | default({}) %}
+                {% set face_summary = face_rec.summary | default('') %}
+                {% if face_rec.success | default(false) and face_summary and face_summary != 'No known faces' %}
+                  {{ face_summary }} - {{ desc }}
                 {% else %}
                   {{ desc }}
                 {% endif %}
