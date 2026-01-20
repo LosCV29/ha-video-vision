@@ -1383,18 +1383,27 @@ class VideoAnalyzer:
                     if response.status == 200:
                         result = await response.json()
                         all_people = result.get("people", [])
+                        # Filter by client confidence threshold
                         identified_people = [
                             p for p in all_people
                             if p.get("name") != "Unknown" and p.get("confidence", 0) >= min_confidence
                         ]
+                        # Use server's summary if it has identified faces, otherwise use client-filtered list
+                        # Server summary respects server-side thresholding (useful for ensemble mode)
+                        server_summary = result.get("summary", "")
+                        no_faces_phrases = ["no faces", "no known faces", ""]
+                        use_server_summary = server_summary and not any(
+                            phrase in server_summary.lower() for phrase in no_faces_phrases
+                        )
+                        summary = server_summary if use_server_summary else (
+                            ", ".join([f"{p['name']} ({p['confidence']}%)" for p in identified_people])
+                            if identified_people else "No known faces"
+                        )
                         return {
                             "success": True,
                             "faces_detected": result.get("faces_detected", 0),
                             "identified_people": identified_people,
-                            "summary": ", ".join([
-                                f"{p['name']} ({p['confidence']}%)"
-                                for p in identified_people
-                            ]) if identified_people else "No known faces",
+                            "summary": summary,
                         }
                     else:
                         error = await response.text()

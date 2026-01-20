@@ -107,7 +107,7 @@ CONF_FACIAL_RECOGNITION_CONFIDENCE: Final = "facial_recognition_confidence"
 
 DEFAULT_FACIAL_RECOGNITION_URL: Final = "http://localhost:8100"
 DEFAULT_FACIAL_RECOGNITION_ENABLED: Final = False
-DEFAULT_FACIAL_RECOGNITION_CONFIDENCE: Final = 50
+DEFAULT_FACIAL_RECOGNITION_CONFIDENCE: Final = 35  # Lowered for ensemble mode (1/3 votes often ~40-50%)
 
 # =============================================================================
 # TIMELINE (Calendar-based event history)
