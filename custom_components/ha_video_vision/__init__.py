@@ -69,11 +69,11 @@ from .const import (
     SERVICE_ANALYZE_CAMERA,
     SERVICE_RECORD_CLIP,
     SERVICE_IDENTIFY_FACES,
-    # Facial Recognition
-    CONF_FACIAL_RECOGNITION_URL,
-    CONF_FACIAL_RECOGNITION_CONFIDENCE,
-    DEFAULT_FACIAL_RECOGNITION_URL,
-    DEFAULT_FACIAL_RECOGNITION_CONFIDENCE,
+    # Facial Recognition (LLM-based)
+    CONF_FACIAL_RECOGNITION_ENABLED,
+    CONF_FACIAL_RECOGNITION_DIRECTORY,
+    DEFAULT_FACIAL_RECOGNITION_ENABLED,
+    DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
     # Timeline
     CONF_TIMELINE_ENABLED,
     # Attributes
@@ -179,8 +179,6 @@ SERVICE_RECORD_SCHEMA = vol.Schema(
 SERVICE_IDENTIFY_FACES_SCHEMA = vol.Schema(
     {
         vol.Required("image_path"): cv.string,
-        vol.Optional("server_url"): cv.string,
-        vol.Optional("min_confidence"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
     }
 )
 
@@ -248,12 +246,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             camera, duration, user_query, frame_position, facial_recognition_frame_position
         )
 
-        # Run facial recognition IN PARALLEL - don't block on AI first!
+        # Run LLM-based facial recognition if enabled
         face_rec_path = result.get("face_rec_snapshot_path") or result.get("snapshot_path")
-        if do_facial_recognition and result.get("success") and face_rec_path:
-            server_url = config.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
-            min_confidence = config.get(CONF_FACIAL_RECOGNITION_CONFIDENCE, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE)
-            face_result = await analyzer.identify_faces(face_rec_path, server_url, min_confidence)
+        facial_rec_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
+        if do_facial_recognition and facial_rec_enabled and result.get("success") and face_rec_path:
+            face_result = await analyzer.identify_faces(face_rec_path)
             result["face_recognition"] = face_result
 
         # Save to timeline if remember is enabled
@@ -287,11 +284,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return await analyzer.record_clip(camera, duration)
 
     async def handle_identify_faces(call: ServiceCall) -> dict[str, Any]:
-        """Handle identify_faces service call."""
+        """Handle identify_faces service call (LLM-based facial recognition)."""
         image_path = call.data["image_path"]
-        server_url = call.data.get("server_url") or config.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
-        min_confidence = call.data.get("min_confidence") or config.get(CONF_FACIAL_RECOGNITION_CONFIDENCE, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE)
-        return await analyzer.identify_faces(image_path, server_url, min_confidence)
+        return await analyzer.identify_faces(image_path)
 
     # Register services with response support
     hass.services.async_register(
@@ -414,6 +409,10 @@ class VideoAnalyzer:
         # Snapshot settings (ensure int type for quality calculations)
         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
         self.snapshot_quality = int(config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY))
+
+        # Facial recognition settings (LLM-based)
+        self.facial_recognition_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
+        self.facial_recognition_directory = config.get(CONF_FACIAL_RECOGNITION_DIRECTORY, DEFAULT_FACIAL_RECOGNITION_DIRECTORY)
 
         _LOGGER.info(
             "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp, FPS: %d%%",
@@ -1354,14 +1353,75 @@ class VideoAnalyzer:
         )
         return error if error else self._extract_openai_response(result, "Local vLLM")
 
-    async def identify_faces(
-        self, image_path: str, server_url: str, min_confidence: int = 50
-    ) -> dict[str, Any]:
-        """Identify faces using the facial recognition add-on."""
-        _LOGGER.debug("Face rec: %s", image_path)
+    async def _load_reference_photos(self) -> dict[str, list[bytes]]:
+        """Load reference photos from the facial recognition directory.
+
+        Directory structure: /config/camera_faces/PersonName/*.jpg
+        Returns: {"PersonName": [photo_bytes, ...], ...}
+        """
+        reference_photos: dict[str, list[bytes]] = {}
+
+        if not self.facial_recognition_directory:
+            return reference_photos
+
+        faces_dir = Path(self.facial_recognition_directory)
+        if not faces_dir.exists():
+            _LOGGER.warning("Facial recognition directory not found: %s", faces_dir)
+            return reference_photos
 
         try:
-            # Read image file
+            # Each subfolder is a person's name
+            for person_dir in faces_dir.iterdir():
+                if not person_dir.is_dir():
+                    continue
+
+                person_name = person_dir.name
+                photos = []
+
+                # Load all image files for this person (limit to 3 for API efficiency)
+                image_extensions = {".jpg", ".jpeg", ".png", ".webp"}
+                image_files = sorted([
+                    f for f in person_dir.iterdir()
+                    if f.suffix.lower() in image_extensions
+                ])[:3]  # Limit to 3 photos per person
+
+                for img_path in image_files:
+                    try:
+                        async with aiofiles.open(img_path, 'rb') as f:
+                            photo_bytes = await f.read()
+                            photos.append(photo_bytes)
+                    except Exception as e:
+                        _LOGGER.debug("Failed to load reference photo %s: %s", img_path, e)
+
+                if photos:
+                    reference_photos[person_name] = photos
+                    _LOGGER.debug("Loaded %d reference photos for %s", len(photos), person_name)
+
+        except Exception as e:
+            _LOGGER.error("Error loading reference photos: %s", e)
+
+        return reference_photos
+
+    async def identify_faces(self, image_path: str) -> dict[str, Any]:
+        """Identify faces using LLM-based comparison with reference photos.
+
+        Uses the same LLM provider configured for video analysis to compare
+        the camera frame against reference photos stored in the faces directory.
+        """
+        _LOGGER.debug("LLM Face rec: %s", image_path)
+
+        try:
+            # Check if facial recognition is enabled
+            if not self.facial_recognition_enabled:
+                return {
+                    "success": False,
+                    "error": "Facial recognition is disabled",
+                    "faces_detected": 0,
+                    "identified_people": [],
+                    "summary": "",
+                }
+
+            # Read camera image
             if not os.path.exists(image_path):
                 _LOGGER.error("Image file NOT FOUND: %s", image_path)
                 return {
@@ -1373,49 +1433,262 @@ class VideoAnalyzer:
                 }
 
             async with aiofiles.open(image_path, 'rb') as f:
-                image_bytes = await f.read()
+                camera_image = await f.read()
 
-            image_b64 = base64.b64encode(image_bytes).decode()
-            url = f"{server_url.rstrip('/')}/identify"
+            # Load reference photos
+            reference_photos = await self._load_reference_photos()
+            if not reference_photos:
+                _LOGGER.warning("No reference photos found in %s", self.facial_recognition_directory)
+                return {
+                    "success": True,
+                    "faces_detected": 0,
+                    "identified_people": [],
+                    "summary": "No reference photos configured",
+                }
 
-            async with asyncio.timeout(10):  # Reduced timeout for speed
-                async with self._session.post(url, json={"image_base64": image_b64}) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        all_people = result.get("people", [])
-                        # Filter out unknown faces and those below confidence threshold
-                        identified_people = [
-                            p for p in all_people
-                            if p.get("name") != "Unknown" and p.get("confidence", 0) >= min_confidence
-                        ]
-                        # Build clean summary: "Carlos 65%" format
-                        if identified_people:
-                            summary = ", ".join([
-                                f"{p['name'].title()} {int(p['confidence'])}%"
-                                for p in identified_people
-                            ])
-                        else:
-                            summary = "No known faces"
-                        return {
-                            "success": True,
-                            "faces_detected": result.get("faces_detected", 0),
-                            "identified_people": identified_people,
-                            "summary": summary,
-                        }
-                    else:
-                        error = await response.text()
-                        _LOGGER.warning("Facial recognition error (%d): %s", response.status, error[:200])
-                        return {
-                            "success": False,
-                            "error": f"Server error: {response.status}",
-                            "faces_detected": 0,
-                            "identified_people": [],
-                            "summary": "",
-                        }
+            # Build the LLM prompt with reference photos
+            people_names = list(reference_photos.keys())
+            _LOGGER.debug("Comparing against %d people: %s", len(people_names), people_names)
 
-        except asyncio.TimeoutError:
-            _LOGGER.warning("Face rec timeout")
-            return {"success": False, "error": "Timeout", "faces_detected": 0, "identified_people": [], "summary": ""}
+            # Use the LLM to identify faces
+            result = await self._identify_faces_with_llm(camera_image, reference_photos)
+
+            return result
+
         except Exception as e:
-            _LOGGER.error("Face rec error: %s", e)
+            _LOGGER.error("LLM Face rec error: %s", e)
             return {"success": False, "error": str(e), "faces_detected": 0, "identified_people": [], "summary": ""}
+
+    async def _identify_faces_with_llm(
+        self, camera_image: bytes, reference_photos: dict[str, list[bytes]]
+    ) -> dict[str, Any]:
+        """Use the LLM to identify faces by comparing camera image to reference photos."""
+        effective_provider, effective_model, effective_api_key = self._get_effective_provider()
+
+        # Build prompt parts with reference photos
+        people_names = list(reference_photos.keys())
+
+        # System prompt for facial recognition
+        system_prompt = (
+            "You are a facial recognition assistant. You will be shown reference photos of known people, "
+            "followed by a camera image. Your task is to identify if any person in the camera image "
+            "matches any of the known people from the reference photos.\n\n"
+            "IMPORTANT RULES:\n"
+            "1. Compare facial features carefully: face shape, eyes, nose, mouth, hair, skin tone\n"
+            "2. Only identify someone if you are reasonably confident (40%+ certainty)\n"
+            "3. Consider lighting, angle, and image quality differences\n"
+            "4. If you cannot see faces clearly or no one matches, say 'No known faces'\n\n"
+            "RESPONSE FORMAT (strictly follow this):\n"
+            "- If you identify someone: 'PersonName XX%' where XX is your confidence (0-100)\n"
+            "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
+            "- If no match or no faces visible: 'No known faces'\n\n"
+            "Only respond with the identification result, nothing else."
+        )
+
+        # Build the user prompt describing the reference photos
+        user_prompt = f"I have reference photos for {len(people_names)} people: {', '.join(people_names)}.\n\n"
+        user_prompt += "First, I'll show you the reference photos for each person, then the camera image to analyze.\n\n"
+
+        if effective_provider == PROVIDER_GOOGLE:
+            result = await self._identify_faces_google(
+                camera_image, reference_photos, effective_model, effective_api_key, system_prompt, user_prompt
+            )
+        elif effective_provider == PROVIDER_OPENROUTER:
+            result = await self._identify_faces_openrouter(
+                camera_image, reference_photos, effective_model, effective_api_key, system_prompt, user_prompt
+            )
+        else:
+            # Local provider
+            result = await self._identify_faces_local(
+                camera_image, reference_photos, system_prompt, user_prompt
+            )
+
+        return result
+
+    async def _identify_faces_google(
+        self, camera_image: bytes, reference_photos: dict[str, list[bytes]],
+        model: str, api_key: str, system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
+        """Identify faces using Google Gemini."""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+        # Build parts array with reference photos and camera image
+        parts = []
+
+        # Add reference photos with labels
+        for person_name, photos in reference_photos.items():
+            parts.append({"text": f"Reference photos of {person_name}:"})
+            for photo in photos:
+                photo_b64 = base64.b64encode(photo).decode()
+                parts.append({"inline_data": {"mime_type": "image/jpeg", "data": photo_b64}})
+
+        # Add the camera image to analyze
+        parts.append({"text": "\nNow analyze this camera image and identify any matching people:"})
+        camera_b64 = base64.b64encode(camera_image).decode()
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": camera_b64}})
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "generationConfig": {
+                "temperature": 0.1,  # Low temperature for consistent identification
+                "maxOutputTokens": 100,
+            }
+        }
+
+        result, error = await self._make_ai_request(url, payload, provider_name="Gemini Face Rec")
+        if error:
+            return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
+
+        # Parse Gemini response
+        candidates = result.get("candidates", [])
+        if not candidates:
+            return {"success": True, "faces_detected": 0, "identified_people": [], "summary": "No known faces"}
+
+        response_text = ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for p in parts:
+            if "text" in p:
+                response_text += p["text"]
+
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+
+    async def _identify_faces_openrouter(
+        self, camera_image: bytes, reference_photos: dict[str, list[bytes]],
+        model: str, api_key: str, system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
+        """Identify faces using OpenRouter."""
+        # Build content array with reference photos and camera image
+        content = []
+
+        # Add reference photos with labels
+        for person_name, photos in reference_photos.items():
+            content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
+            for photo in photos:
+                photo_b64 = base64.b64encode(photo).decode()
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
+
+        # Add the camera image to analyze
+        content.append({"type": "text", "text": "\nNow analyze this camera image and identify any matching people:"})
+        camera_b64 = base64.b64encode(camera_image).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{camera_b64}"}})
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ],
+            "max_tokens": 100,
+            "temperature": 0.1,
+        }
+
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        result, error = await self._make_ai_request(
+            "https://openrouter.ai/api/v1/chat/completions", payload, headers, provider_name="OpenRouter Face Rec"
+        )
+
+        if error:
+            return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
+
+        response_text = self._extract_openai_response(result, "OpenRouter")
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+
+    async def _identify_faces_local(
+        self, camera_image: bytes, reference_photos: dict[str, list[bytes]],
+        system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
+        """Identify faces using local vLLM endpoint."""
+        # Build content array with reference photos and camera image
+        content = []
+
+        # Add reference photos with labels
+        for person_name, photos in reference_photos.items():
+            content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
+            for photo in photos:
+                photo_b64 = base64.b64encode(photo).decode()
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
+
+        # Add the camera image to analyze
+        content.append({"type": "text", "text": "\nNow analyze this camera image and identify any matching people:"})
+        camera_b64 = base64.b64encode(camera_image).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{camera_b64}"}})
+
+        payload = {
+            "model": self.vllm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ],
+            "max_tokens": 100,
+            "temperature": 0.1,
+        }
+
+        result, error = await self._make_ai_request(
+            f"{self.base_url}/chat/completions", payload, timeout=120, provider_name="Local vLLM Face Rec"
+        )
+
+        if error:
+            return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
+
+        response_text = self._extract_openai_response(result, "Local vLLM")
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+
+    def _parse_face_recognition_response(
+        self, response_text: str, known_people: list[str]
+    ) -> dict[str, Any]:
+        """Parse LLM response to extract identified people and confidence.
+
+        Expected format: "PersonName XX%" or "PersonName1 XX%, PersonName2 YY%"
+        """
+        response_text = response_text.strip()
+        _LOGGER.debug("Face rec response: %s", response_text)
+
+        # Check for "no faces" type responses
+        no_face_phrases = ["no known faces", "no faces", "no match", "cannot identify", "unable to identify"]
+        if any(phrase in response_text.lower() for phrase in no_face_phrases):
+            return {
+                "success": True,
+                "faces_detected": 0,
+                "identified_people": [],
+                "summary": "No known faces",
+            }
+
+        identified_people = []
+
+        # Parse "Name XX%" patterns
+        # Match patterns like "Carlos 65%", "Carlos: 65%", "Carlos (65%)"
+        pattern = r'(\w+)\s*[:(\s]*(\d+)\s*%'
+        matches = re.findall(pattern, response_text, re.IGNORECASE)
+
+        for name, confidence in matches:
+            # Verify the name matches one of our known people (case-insensitive)
+            matched_name = None
+            for known_name in known_people:
+                if name.lower() == known_name.lower():
+                    matched_name = known_name
+                    break
+
+            if matched_name:
+                identified_people.append({
+                    "name": matched_name,
+                    "confidence": int(confidence),
+                })
+
+        # Build summary in "Name XX%" format
+        if identified_people:
+            summary = ", ".join([
+                f"{p['name'].title()} {p['confidence']}%"
+                for p in identified_people
+            ])
+            faces_detected = len(identified_people)
+        else:
+            summary = "No known faces"
+            faces_detected = 0
+
+        return {
+            "success": True,
+            "faces_detected": faces_detected,
+            "identified_people": identified_people,
+            "summary": summary,
+        }

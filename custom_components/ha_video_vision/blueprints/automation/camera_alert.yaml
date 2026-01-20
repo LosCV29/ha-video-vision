@@ -3,7 +3,7 @@ blueprint:
   description: >
     When person is detected, record video, run AI analysis,
     and send mobile notifications with snapshot. Optionally identify
-    known faces using the Facial Recognition add-on.
+    known faces using LLM-based facial recognition (compares against reference photos).
     Works with iOS and Android via Nabu Casa.
   domain: automation
   author: "HA Video Vision Integration"
@@ -109,10 +109,10 @@ blueprint:
           step: 10
           unit_of_measurement: "%"
 
-    # Facial Recognition
+    # Facial Recognition (LLM-based)
     facial_recognition_enabled:
       name: "Enable Facial Recognition"
-      description: "Identify known faces using the Facial Recognition add-on. Configure the server URL in the integration settings."
+      description: "Identify known faces using LLM-based recognition. Store reference photos in the directory configured in integration settings (e.g., /config/camera_faces/PersonName/)."
       default: false
       selector:
         boolean:

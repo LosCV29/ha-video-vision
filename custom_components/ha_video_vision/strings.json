@@ -155,11 +155,10 @@
       },
       "facial_recognition": {
         "title": "Facial Recognition",
-        "description": "Configure the Facial Recognition add-on. {url_hint}",
+        "description": "LLM-based facial recognition using reference photos. {directory_hint}",
         "data": {
           "facial_recognition_enabled": "Enable Facial Recognition",
-          "facial_recognition_url": "Server URL",
-          "facial_recognition_confidence": "Minimum Confidence"
+          "facial_recognition_directory": "Reference Photos Directory"
         }
       },
       "timeline": {

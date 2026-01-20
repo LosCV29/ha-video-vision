@@ -57,13 +57,11 @@ from .const import (
     CONF_SNAPSHOT_QUALITY,
     DEFAULT_SNAPSHOT_DIR,
     DEFAULT_SNAPSHOT_QUALITY,
-    # Facial Recognition
-    CONF_FACIAL_RECOGNITION_URL,
+    # Facial Recognition (LLM-based)
     CONF_FACIAL_RECOGNITION_ENABLED,
-    CONF_FACIAL_RECOGNITION_CONFIDENCE,
-    DEFAULT_FACIAL_RECOGNITION_URL,
+    CONF_FACIAL_RECOGNITION_DIRECTORY,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
-    DEFAULT_FACIAL_RECOGNITION_CONFIDENCE,
+    DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
     # Timeline
     CONF_TIMELINE_ENABLED,
     CONF_TIMELINE_RETENTION_DAYS,
@@ -877,29 +875,10 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
     async def async_step_facial_recognition(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle facial recognition settings."""
-        errors = {}
-
+        """Handle facial recognition settings (LLM-based with reference photos)."""
         if user_input is not None:
-            # Validate URL if enabled
-            if user_input.get(CONF_FACIAL_RECOGNITION_ENABLED, False):
-                url = user_input.get(CONF_FACIAL_RECOGNITION_URL, "").strip()
-                if url:
-                    # Test connection to facial recognition server
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(
-                                f"{url.rstrip('/')}/status",
-                                timeout=aiohttp.ClientTimeout(total=5)
-                            ) as response:
-                                if response.status != 200:
-                                    errors["base"] = "cannot_connect"
-                    except Exception:
-                        errors["base"] = "cannot_connect"
-
-            if not errors:
-                new_options = {**self._entry.options, **user_input}
-                return self.async_create_entry(title="", data=new_options)
+            new_options = {**self._entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
 
         current = {**self._entry.data, **self._entry.options}
 
@@ -911,21 +890,14 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
                 ): selector.BooleanSelector(),
                 vol.Required(
-                    CONF_FACIAL_RECOGNITION_URL,
-                    default=current.get(CONF_FACIAL_RECOGNITION_URL, DEFAULT_FACIAL_RECOGNITION_URL)
+                    CONF_FACIAL_RECOGNITION_DIRECTORY,
+                    default=current.get(CONF_FACIAL_RECOGNITION_DIRECTORY, DEFAULT_FACIAL_RECOGNITION_DIRECTORY)
                 ): selector.TextSelector(
-                    selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
-                ),
-                vol.Required(
-                    CONF_FACIAL_RECOGNITION_CONFIDENCE,
-                    default=current.get(CONF_FACIAL_RECOGNITION_CONFIDENCE, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER)
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
                 ),
             }),
-            errors=errors,
             description_placeholders={
-                "url_hint": "URL of Facial Recognition add-on (e.g., http://localhost:8100)",
+                "directory_hint": "Directory containing subfolders per person (e.g., /config/camera_faces/Carlos/)",
             },
         )
 
