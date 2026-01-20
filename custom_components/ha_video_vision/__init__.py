@@ -74,8 +74,10 @@ from .const import (
     # Facial Recognition (LLM-based)
     CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_DIRECTORY,
+    CONF_FACIAL_RECOGNITION_RESOLUTION,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
     DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
+    DEFAULT_FACIAL_RECOGNITION_RESOLUTION,
     # Timeline
     CONF_TIMELINE_ENABLED,
     # Attributes
@@ -415,6 +417,7 @@ class VideoAnalyzer:
         # Facial recognition settings (LLM-based)
         self.facial_recognition_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
         self.facial_recognition_directory = config.get(CONF_FACIAL_RECOGNITION_DIRECTORY, DEFAULT_FACIAL_RECOGNITION_DIRECTORY)
+        self.facial_recognition_resolution = int(config.get(CONF_FACIAL_RECOGNITION_RESOLUTION, DEFAULT_FACIAL_RECOGNITION_RESOLUTION))
 
         _LOGGER.info(
             "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp, FPS: %d%%",
@@ -1538,19 +1541,25 @@ class VideoAnalyzer:
         """Identify faces using Google Gemini."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
+        # Use configured resolution (0 = original, no resize)
+        res = self.facial_recognition_resolution
+        quality = 90  # High quality for cloud providers
+
         # Build parts array with reference photos and camera image
         parts = []
 
-        # Add reference photos with labels
+        # Add reference photos with labels (optionally resized based on config)
         for person_name, photos in reference_photos.items():
             parts.append({"text": f"Reference photos of {person_name}:"})
             for photo in photos:
-                photo_b64 = base64.b64encode(photo).decode()
+                processed = await asyncio.to_thread(self._resize_reference_image, photo, res, quality)
+                photo_b64 = base64.b64encode(processed).decode()
                 parts.append({"inline_data": {"mime_type": "image/jpeg", "data": photo_b64}})
 
         # Add the camera image to analyze
         parts.append({"text": "\nNow analyze this camera image and identify any matching people:"})
-        camera_b64 = base64.b64encode(camera_image).decode()
+        processed_camera = await asyncio.to_thread(self._resize_reference_image, camera_image, res, quality)
+        camera_b64 = base64.b64encode(processed_camera).decode()
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": camera_b64}})
 
         payload = {
@@ -1584,19 +1593,25 @@ class VideoAnalyzer:
         model: str, api_key: str, system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
         """Identify faces using OpenRouter."""
+        # Use configured resolution (0 = original, no resize)
+        res = self.facial_recognition_resolution
+        quality = 90  # High quality for cloud providers
+
         # Build content array with reference photos and camera image
         content = []
 
-        # Add reference photos with labels
+        # Add reference photos with labels (optionally resized based on config)
         for person_name, photos in reference_photos.items():
             content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
             for photo in photos:
-                photo_b64 = base64.b64encode(photo).decode()
+                processed = await asyncio.to_thread(self._resize_reference_image, photo, res, quality)
+                photo_b64 = base64.b64encode(processed).decode()
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
 
         # Add the camera image to analyze
         content.append({"type": "text", "text": "\nNow analyze this camera image and identify any matching people:"})
-        camera_b64 = base64.b64encode(camera_image).decode()
+        processed_camera = await asyncio.to_thread(self._resize_reference_image, camera_image, res, quality)
+        camera_b64 = base64.b64encode(processed_camera).decode()
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{camera_b64}"}})
 
         payload = {
@@ -1620,24 +1635,34 @@ class VideoAnalyzer:
         response_text = self._extract_openai_response(result, "OpenRouter")
         return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
 
-    def _resize_image_for_local(self, image_bytes: bytes, max_size: int = 512) -> bytes:
-        """Resize image to reduce token count for local vLLM.
+    def _resize_reference_image(self, image_bytes: bytes, max_size: int = 768, quality: int = 90) -> bytes:
+        """Resize reference image for facial recognition.
 
-        Local models have smaller context windows, so we resize images to fit more
-        reference photos while staying under the token limit.
+        Args:
+            image_bytes: Original image bytes
+            max_size: Maximum dimension (0 = no resize, keep original)
+            quality: JPEG quality (1-100, higher = sharper)
+
+        Returns:
+            Resized image bytes, or original if max_size is 0
         """
+        # If max_size is 0, return original image (sharpest possible)
+        if max_size == 0:
+            return image_bytes
+
         try:
             img = Image.open(BytesIO(image_bytes))
             # Convert to RGB if necessary (handles RGBA, P modes, etc.)
             if img.mode not in ('RGB', 'L'):
                 img = img.convert('RGB')
 
-            # Resize maintaining aspect ratio
-            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            # Only resize if image is larger than max_size
+            if max(img.size) > max_size:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
-            # Save as JPEG with moderate quality
+            # Save as JPEG with configured quality
             output = BytesIO()
-            img.save(output, format='JPEG', quality=75)
+            img.save(output, format='JPEG', quality=quality)
             return output.getvalue()
         except Exception as e:
             _LOGGER.debug("Failed to resize image: %s, using original", e)
@@ -1650,8 +1675,9 @@ class VideoAnalyzer:
         """Identify faces using local vLLM endpoint."""
         # Local vLLM has limited context (~24k tokens), so we need to:
         # 1. Limit number of people to 4 max
-        # 2. Resize images to reduce token usage
+        # 2. Resize images to reduce token usage (cap at 512 for local)
         MAX_PEOPLE = 4
+        MAX_LOCAL_RESOLUTION = 512  # Hard cap for local vLLM to prevent token overflow
         limited_photos = dict(list(reference_photos.items())[:MAX_PEOPLE])
 
         if len(reference_photos) > MAX_PEOPLE:
@@ -1660,6 +1686,14 @@ class VideoAnalyzer:
                 MAX_PEOPLE, len(reference_photos)
             )
 
+        # Use configured resolution but cap at 512 for local vLLM
+        configured_res = self.facial_recognition_resolution
+        if configured_res == 0:
+            # User wants original, but we must cap for local
+            local_res = MAX_LOCAL_RESOLUTION
+        else:
+            local_res = min(configured_res, MAX_LOCAL_RESOLUTION)
+
         # Build content array with resized reference photos and camera image
         content = []
 
@@ -1667,13 +1701,13 @@ class VideoAnalyzer:
         for person_name, photos in limited_photos.items():
             content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
             for photo in photos:
-                resized = await asyncio.to_thread(self._resize_image_for_local, photo)
+                resized = await asyncio.to_thread(self._resize_reference_image, photo, local_res, 75)
                 photo_b64 = base64.b64encode(resized).decode()
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
 
         # Add the camera image to analyze (also resized)
         content.append({"type": "text", "text": "\nNow analyze this camera image and identify any matching people:"})
-        resized_camera = await asyncio.to_thread(self._resize_image_for_local, camera_image)
+        resized_camera = await asyncio.to_thread(self._resize_reference_image, camera_image, local_res, 75)
         camera_b64 = base64.b64encode(resized_camera).decode()
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{camera_b64}"}})
 

@@ -140,10 +140,11 @@
       },
       "facial_recognition": {
         "title": "Facial Recognition",
-        "description": "LLM-based facial recognition. Store reference photos in subfolders per person (e.g., /config/camera_faces/Carlos/).",
+        "description": "LLM-based facial recognition. Store reference photos in subfolders per person (e.g., /config/camera_faces/Carlos/).\n\nResolution controls the quality of reference photos sent to the LLM. Higher resolution = sharper images but uses more tokens.",
         "data": {
           "facial_recognition_enabled": "Enable Facial Recognition",
-          "facial_recognition_directory": "Reference Photos Directory"
+          "facial_recognition_directory": "Reference Photos Directory",
+          "facial_recognition_resolution": "Reference Photo Resolution"
         }
       },
       "camera_context": {
