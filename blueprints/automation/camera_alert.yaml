@@ -130,7 +130,7 @@ variables:
   face_rec_enabled: !input facial_recognition_enabled
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles/animals whether moving or stationary
-  default_prompt: "Describe any people, animals, pets, vehicles, or notable activity visible. Report ALL people, animals, and vehicles, whether moving or stationary. For people, describe their appearance and actions. For animals, identify the type (dog, cat, etc.) and what they are doing. Ignore static background objects like parked cars and structures. If no people, animals, vehicles, or notable activity are present, respond: 'No activity observed.' 2-3 sentences max."
+  default_prompt: "IMPORTANT: Scan the ENTIRE frame carefully, including background, edges, and shadows. Report ANY people visible, no matter how small or distant. Report ALL vehicles present. For people, describe their location, appearance and actions. For animals, identify the type and behavior. For vehicles, note type, color, and position. Only say 'No activity observed' if the frame is completely empty of people, animals, and vehicles. 2-3 sentences max."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}
