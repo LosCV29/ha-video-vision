@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -450,7 +451,6 @@ class VideoAnalyzer:
 
     def _get_camera_matches(self) -> list[dict]:
         """Get list of all cameras with searchable names (cached for 30s)."""
-        import time
         current_time = time.time()
 
         # Check cache first
@@ -819,7 +819,7 @@ class VideoAnalyzer:
 
     async def record_clip(self, camera_input: str, duration: int = None) -> dict[str, Any]:
         """Record a video clip from camera."""
-        duration = duration or self.video_duration
+        duration = duration if duration is not None else self.video_duration
         
         entity_id = self._find_camera_entity(camera_input)
         if not entity_id:
@@ -1039,7 +1039,7 @@ class VideoAnalyzer:
                           If different from notification frame_position, extracts a separate frame.
                           None = use same frame as notification.
         """
-        duration = duration or self.video_duration
+        duration = duration if duration is not None else self.video_duration
 
         # SPEED: Find entity first (fast sync lookup)
         entity_id = self._find_camera_entity(camera_input)
