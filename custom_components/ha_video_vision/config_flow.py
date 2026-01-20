@@ -60,8 +60,10 @@ from .const import (
     # Facial Recognition (LLM-based)
     CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_DIRECTORY,
+    CONF_FACIAL_RECOGNITION_RESOLUTION,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
     DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
+    DEFAULT_FACIAL_RECOGNITION_RESOLUTION,
     # Timeline
     CONF_TIMELINE_ENABLED,
     CONF_TIMELINE_RETENTION_DAYS,
@@ -877,6 +879,9 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Handle facial recognition settings (LLM-based with reference photos)."""
         if user_input is not None:
+            # Convert resolution to int
+            if CONF_FACIAL_RECOGNITION_RESOLUTION in user_input:
+                user_input[CONF_FACIAL_RECOGNITION_RESOLUTION] = int(user_input[CONF_FACIAL_RECOGNITION_RESOLUTION])
             new_options = {**self._entry.options, **user_input}
             return self.async_create_entry(title="", data=new_options)
 
@@ -894,6 +899,21 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(CONF_FACIAL_RECOGNITION_DIRECTORY, DEFAULT_FACIAL_RECOGNITION_DIRECTORY)
                 ): selector.TextSelector(
                     selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+                ),
+                vol.Required(
+                    CONF_FACIAL_RECOGNITION_RESOLUTION,
+                    default=str(current.get(CONF_FACIAL_RECOGNITION_RESOLUTION, DEFAULT_FACIAL_RECOGNITION_RESOLUTION))
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            {"label": "Original (no resize - sharpest)", "value": "0"},
+                            {"label": "1024px (high quality)", "value": "1024"},
+                            {"label": "768px (recommended)", "value": "768"},
+                            {"label": "512px (faster, more people)", "value": "512"},
+                            {"label": "384px (local vLLM optimized)", "value": "384"},
+                        ],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 ),
             }),
             description_placeholders={},
