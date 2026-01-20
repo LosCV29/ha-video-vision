@@ -5,6 +5,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -82,6 +83,9 @@ from .const import (
     ATTR_FACIAL_RECOGNITION_FRAME_POSITION,
     ATTR_REMEMBER,
     ATTR_FRAME_POSITION,
+    # Detection Keywords
+    PERSON_KEYWORDS,
+    ANIMAL_KEYWORDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -428,7 +432,6 @@ class VideoAnalyzer:
 
     def _normalize_name(self, name: str) -> str:
         """Normalize a name for comparison (lowercase, remove special chars)."""
-        import re
         # Lowercase, replace underscores/hyphens with spaces, remove extra spaces
         normalized = name.lower().strip()
         normalized = re.sub(r'[_\-]+', ' ', normalized)
@@ -874,12 +877,25 @@ class VideoAnalyzer:
                 except Exception:
                     pass
 
-    async def _record_video_and_frames(
+    async def _record_video_and_extract_frames(
         self, entity_id: str, duration: int, frame_position: int | None = None,
-        facial_recognition_frame_position: int | None = None
+        facial_recognition_frame_position: int | None = None, stream_url: str | None = None
     ) -> tuple[bytes | None, bytes | None, bytes | None]:
-        """Record video and extract frame. Simple and fast."""
-        stream_url = await self._get_stream_url(entity_id)
+        """Record video and extract frames. Unified method for all video capture.
+
+        Args:
+            entity_id: Camera entity ID
+            duration: Recording duration in seconds
+            frame_position: Position in video for notification frame (0-100%)
+            facial_recognition_frame_position: Separate position for face rec frame
+            stream_url: Pre-fetched stream URL (if None, will be fetched)
+
+        Returns:
+            Tuple of (video_bytes, frame_bytes, face_rec_frame_bytes)
+        """
+        # Fetch stream URL if not provided
+        if stream_url is None:
+            stream_url = await self._get_stream_url(entity_id)
 
         video_bytes = None
         frame_bytes = None
@@ -891,7 +907,6 @@ class VideoAnalyzer:
 
         if not stream_url:
             # No stream URL (cloud camera like Ring/Nest) - use snapshot only
-            # Use optimized cloud camera strategy with wake-up request
             _LOGGER.info(
                 "Cloud camera detected: %s - using optimized snapshot mode. "
                 "For video analysis, consider using ring-mqtt add-on for RTSP streaming.",
@@ -912,9 +927,8 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
 
-            # Simple ffmpeg recording - no FPS probing, no complexity
+            # Build and execute ffmpeg recording command
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
-
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -923,33 +937,28 @@ class VideoAnalyzer:
 
             _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 10)
 
-            # Check if ffmpeg succeeded
             if video_proc.returncode != 0:
                 stderr_text = stderr.decode() if stderr else "No error output"
                 _LOGGER.error("FFmpeg failed (code %d) for %s: %s",
                             video_proc.returncode, entity_id, stderr_text[:500])
                 raise RuntimeError(f"FFmpeg failed: {stderr_text[:200]}")
 
-            # Read the video file
+            # Read video and extract frames
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
                 async with aiofiles.open(video_path, 'rb') as f:
                     video_bytes = await f.read()
 
-                # PARALLEL frame extraction for SPEED
+                # Extract frames in parallel for speed
                 frame_time = duration * (frame_position / 100)
-
-                # Build notification frame command
                 frame_cmd = [
                     "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
                     "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", frame_path
                 ]
-
-                # Start notification frame extraction
                 frame_proc = await asyncio.create_subprocess_exec(
                     *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
 
-                # Start face rec frame extraction IN PARALLEL if different position
+                # Start face rec frame extraction in parallel if different position
                 face_rec_proc = None
                 if (facial_recognition_frame_position is not None and
                     facial_recognition_frame_position != frame_position):
@@ -964,12 +973,12 @@ class VideoAnalyzer:
                         *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                     )
 
-                # Wait for BOTH extractions in parallel
+                # Wait for both extractions
                 await asyncio.wait_for(frame_proc.wait(), timeout=10)
                 if face_rec_proc:
                     await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
 
-                # Read frames
+                # Read extracted frames
                 if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
                     async with aiofiles.open(frame_path, 'rb') as f:
                         frame_bytes = await f.read()
@@ -981,7 +990,6 @@ class VideoAnalyzer:
 
         except Exception as e:
             _LOGGER.error("Error recording video from %s: %s", entity_id, e)
-            # Try to get a snapshot as fallback
             fallback_frame = await self._get_camera_snapshot(entity_id)
             return None, fallback_frame, None
         finally:
@@ -1003,103 +1011,6 @@ class VideoAnalyzer:
         except Exception as e:
             _LOGGER.error("Failed to save snapshot: %s", e)
             return None
-
-    async def _record_video_with_url(
-        self, entity_id: str, stream_url: str | None, duration: int,
-        frame_position: int | None = None, facial_recognition_frame_position: int | None = None
-    ) -> tuple[bytes | None, bytes | None, bytes | None]:
-        """Record video with pre-fetched stream URL. ZERO lookup delay - FFmpeg starts immediately."""
-        video_bytes = None
-        frame_bytes = None
-        face_rec_frame_bytes = None
-
-        if frame_position is None:
-            frame_position = self.notification_frame_position
-
-        if not stream_url:
-            # Cloud camera - no RTSP stream available
-            _LOGGER.info("Cloud camera: %s - using snapshot mode", entity_id)
-            frame_bytes = await self._get_camera_snapshot(entity_id, retries=3, delay=1.0, is_cloud_camera=True)
-            return video_bytes, frame_bytes, None
-
-        video_path = None
-        frame_path = None
-        face_rec_frame_path = None
-
-        try:
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as vf:
-                video_path = vf.name
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
-                frame_path = ff.name
-
-            # START FFMPEG IMMEDIATELY - stream URL already available
-            video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
-            video_proc = await asyncio.create_subprocess_exec(
-                *video_cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 10)
-
-            if video_proc.returncode != 0:
-                stderr_text = stderr.decode() if stderr else "No error output"
-                _LOGGER.error("FFmpeg failed (code %d) for %s: %s",
-                            video_proc.returncode, entity_id, stderr_text[:500])
-                raise RuntimeError(f"FFmpeg failed: {stderr_text[:200]}")
-
-            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-                async with aiofiles.open(video_path, 'rb') as f:
-                    video_bytes = await f.read()
-
-                # Extract frames in parallel
-                frame_time = duration * (frame_position / 100)
-                frame_cmd = [
-                    "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
-                    "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", frame_path
-                ]
-                frame_proc = await asyncio.create_subprocess_exec(
-                    *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
-
-                face_rec_proc = None
-                if (facial_recognition_frame_position is not None and
-                    facial_recognition_frame_position != frame_position):
-                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as frf:
-                        face_rec_frame_path = frf.name
-                    face_rec_frame_time = duration * (facial_recognition_frame_position / 100)
-                    face_rec_cmd = [
-                        "ffmpeg", "-y", "-ss", str(face_rec_frame_time), "-i", video_path,
-                        "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", face_rec_frame_path
-                    ]
-                    face_rec_proc = await asyncio.create_subprocess_exec(
-                        *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                    )
-
-                await asyncio.wait_for(frame_proc.wait(), timeout=10)
-                if face_rec_proc:
-                    await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
-
-                if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
-                    async with aiofiles.open(frame_path, 'rb') as f:
-                        frame_bytes = await f.read()
-                if face_rec_frame_path and os.path.exists(face_rec_frame_path) and os.path.getsize(face_rec_frame_path) > 0:
-                    async with aiofiles.open(face_rec_frame_path, 'rb') as f:
-                        face_rec_frame_bytes = await f.read()
-
-            return video_bytes, frame_bytes, face_rec_frame_bytes
-
-        except Exception as e:
-            _LOGGER.error("Error recording video from %s: %s", entity_id, e)
-            fallback_frame = await self._get_camera_snapshot(entity_id)
-            return None, fallback_frame, None
-        finally:
-            for path in [video_path, frame_path, face_rec_frame_path]:
-                if path and os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
 
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = "",
@@ -1145,8 +1056,8 @@ class VideoAnalyzer:
 
         # NOW start video recording with the stream URL (FFmpeg starts immediately)
         video_task = asyncio.create_task(
-            self._record_video_with_url(
-                entity_id, stream_url, duration, frame_position, facial_recognition_frame_position
+            self._record_video_and_extract_frames(
+                entity_id, duration, frame_position, facial_recognition_frame_position, stream_url
             )
         )
 
@@ -1194,31 +1105,10 @@ class VideoAnalyzer:
         if face_rec_snapshot_task:
             face_rec_snapshot_path = await face_rec_snapshot_task
 
-        # Check for person-related words in AI description
-        # Expanded list to catch more variations of how the AI might describe people
-        description_text = description or ""
-        person_keywords = [
-            "person", "people", "someone", "man", "woman", "child",
-            "individual", "adult", "figure", "pedestrian", "walker",
-            "visitor", "delivery", "carrier", "walking", "standing",
-            "approaching", "leaving", "human", "resident", "guest"
-        ]
-        person_detected = any(
-            word in description_text.lower()
-            for word in person_keywords
-        )
-
-        # Check for animal-related words in AI description
-        animal_keywords = [
-            "dog", "cat", "pet", "animal", "puppy", "kitten",
-            "canine", "feline", "bird", "squirrel", "rabbit",
-            "deer", "raccoon", "fox", "coyote", "wildlife",
-            "creature", "critter", "hound", "pup", "kitty"
-        ]
-        animal_detected = any(
-            word in description_text.lower()
-            for word in animal_keywords
-        )
+        # Check for person/animal-related words in AI description
+        description_lower = (description or "").lower()
+        person_detected = any(word in description_lower for word in PERSON_KEYWORDS)
+        animal_detected = any(word in description_lower for word in ANIMAL_KEYWORDS)
 
         return {
             "success": True,
@@ -1267,6 +1157,51 @@ class VideoAnalyzer:
                 "never assume identities. Be accurate and factual."
             )
 
+    # Shared error message for cloud cameras without video streams
+    _NO_VIDEO_ERROR = (
+        "No video stream available for this camera. "
+        "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
+        "then verify the 'stream_source' attribute exists on the camera's Info sensor. "
+        "See https://github.com/LosCV29/ha-video-vision/blob/main/docs/RING_MQTT_SETUP.md for setup guide."
+    )
+
+    def _extract_openai_response(self, result: dict, provider_name: str) -> str:
+        """Extract text content from OpenAI-compatible API response.
+
+        Used by OpenRouter and Local providers which use the same response format.
+        """
+        choices = result.get("choices", [])
+        if not choices:
+            _LOGGER.warning("%s returned empty choices: %s", provider_name, result)
+            return "No response from AI (empty choices)"
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        if not content:
+            _LOGGER.warning("%s returned empty content", provider_name)
+            return "No description available from AI"
+        return content
+
+    async def _make_ai_request(
+        self, url: str, payload: dict, headers: dict | None = None,
+        timeout: int = 60, provider_name: str = "AI"
+    ) -> tuple[dict | None, str | None]:
+        """Make HTTP request to AI provider with unified error handling.
+
+        Returns: (response_json, error_message) - one will be None
+        """
+        try:
+            async with asyncio.timeout(timeout):
+                async with self._session.post(url, json=payload, headers=headers) as response:
+                    if response.status == 200:
+                        return await response.json(), None
+                    else:
+                        error = await response.text()
+                        _LOGGER.error("%s error: %s", provider_name, error[:500])
+                        return None, f"Analysis failed: {response.status}"
+        except Exception as e:
+            _LOGGER.error("%s analysis error: %s", provider_name, e)
+            return None, f"Analysis error: {str(e)}"
+
     async def _analyze_with_provider(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, entity_id: str = ""
     ) -> tuple[str, str]:
@@ -1274,18 +1209,15 @@ class VideoAnalyzer:
 
         Returns: (description, provider_used)
         """
-        # Get provider settings
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
-
-        # Build context-aware system prompt
         system_prompt = self._build_system_prompt(entity_id)
 
         _LOGGER.debug("Sending to AI: %s", effective_provider)
 
         if effective_provider == PROVIDER_GOOGLE:
-            result = await self._analyze_google(video_bytes, frame_bytes, prompt, effective_model, effective_api_key, system_prompt)
+            result = await self._analyze_google(video_bytes, prompt, effective_model, effective_api_key, system_prompt)
         elif effective_provider == PROVIDER_OPENROUTER:
-            result = await self._analyze_openrouter(video_bytes, frame_bytes, prompt, effective_model, effective_api_key, system_prompt)
+            result = await self._analyze_openrouter(video_bytes, prompt, effective_model, effective_api_key, system_prompt)
         elif effective_provider == PROVIDER_LOCAL:
             result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt)
         else:
@@ -1294,237 +1226,123 @@ class VideoAnalyzer:
         return result, effective_provider
 
     async def _analyze_google(
-        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        model: str = None, api_key: str = None, system_prompt: str = ""
+        self, video_bytes: bytes | None, prompt: str,
+        model: str, api_key: str, system_prompt: str
     ) -> str:
         """Analyze using Google Gemini - VIDEO ONLY."""
-        # VIDEO ONLY - This integration focuses on video analysis
         if not video_bytes:
-            return (
-                "No video stream available for this camera. "
-                "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
-                "then verify the 'stream_source' attribute exists on the camera's Info sensor. "
-                "See https://github.com/LosCV29/ha-video-vision/blob/main/docs/RING_MQTT_SETUP.md for setup guide."
-            )
+            return self._NO_VIDEO_ERROR
 
-        # Use provided overrides or fall back to config
-        model = model or self.vllm_model
-        api_key = api_key or self.api_key
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        video_b64 = base64.b64encode(video_bytes).decode()
 
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-
-            parts = [{"text": prompt}]
-
-            # VIDEO ONLY - no image analysis
-            video_b64 = base64.b64encode(video_bytes).decode()
-            parts.insert(0, {
-                "inline_data": {
-                    "mime_type": "video/mp4",
-                    "data": video_b64
-                }
-            })
-
-            payload = {
-                "contents": [{"parts": parts}],
-                "systemInstruction": {"parts": [{"text": system_prompt}]},
-                "generationConfig": {
-                    "temperature": self.vllm_temperature,
-                    "maxOutputTokens": self.vllm_max_tokens,
-                }
+        payload = {
+            "contents": [{"parts": [
+                {"inline_data": {"mime_type": "video/mp4", "data": video_b64}},
+                {"text": prompt}
+            ]}],
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "generationConfig": {
+                "temperature": self.vllm_temperature,
+                "maxOutputTokens": self.vllm_max_tokens,
             }
-            
-            async with asyncio.timeout(60):
-                async with self._session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        result = await response.json()
+        }
 
-                        # Handle various Gemini response structures
-                        candidates = result.get("candidates", [])
-                        if not candidates:
-                            # Check for prompt feedback (safety blocking)
-                            prompt_feedback = result.get("promptFeedback", {})
-                            block_reason = prompt_feedback.get("blockReason")
-                            if block_reason:
-                                _LOGGER.warning("Gemini blocked request: %s", block_reason)
-                                return f"Content blocked by safety filters: {block_reason}"
-                            return "No response from Gemini (empty candidates)"
+        result, error = await self._make_ai_request(url, payload, provider_name="Gemini")
+        if error:
+            return error
 
-                        candidate = candidates[0]
+        # Parse Gemini-specific response structure
+        candidates = result.get("candidates", [])
+        if not candidates:
+            prompt_feedback = result.get("promptFeedback", {})
+            block_reason = prompt_feedback.get("blockReason")
+            if block_reason:
+                _LOGGER.warning("Gemini blocked request: %s", block_reason)
+                return f"Content blocked by safety filters: {block_reason}"
+            return "No response from Gemini (empty candidates)"
 
-                        # Check finish reason
-                        finish_reason = candidate.get("finishReason", "")
-                        if finish_reason == "SAFETY":
-                            safety_ratings = candidate.get("safetyRatings", [])
-                            _LOGGER.warning("Gemini safety block: %s", safety_ratings)
-                            return "Content blocked by safety filters"
+        candidate = candidates[0]
+        if candidate.get("finishReason") == "SAFETY":
+            _LOGGER.warning("Gemini safety block: %s", candidate.get("safetyRatings", []))
+            return "Content blocked by safety filters"
 
-                        # Get content
-                        content = candidate.get("content", {})
-                        parts = content.get("parts", [])
+        parts = candidate.get("content", {}).get("parts", [])
+        if not parts:
+            _LOGGER.warning("Gemini returned empty parts. Full response: %s", result)
+            return "No text in Gemini response"
 
-                        if not parts:
-                            _LOGGER.warning("Gemini returned empty parts. Full response: %s", result)
-                            return "No text in Gemini response"
-
-                        # Extract text from parts
-                        text_parts = [p.get("text", "") for p in parts if "text" in p]
-                        return "".join(text_parts) if text_parts else "No text in response"
-                    else:
-                        error = await response.text()
-                        _LOGGER.error("Gemini error: %s", error[:500])
-                        return f"Analysis failed: {response.status}"
-
-        except Exception as e:
-            _LOGGER.error("Gemini analysis error: %s", e)
-            return f"Analysis error: {str(e)}"
+        text_parts = [p.get("text", "") for p in parts if "text" in p]
+        return "".join(text_parts) if text_parts else "No text in response"
 
     async def _analyze_openrouter(
-        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        model: str = None, api_key: str = None, system_prompt: str = ""
+        self, video_bytes: bytes | None, prompt: str,
+        model: str, api_key: str, system_prompt: str
     ) -> str:
         """Analyze using OpenRouter - VIDEO ONLY."""
-        # VIDEO ONLY - This integration focuses on video analysis
         if not video_bytes:
-            return (
-                "No video stream available for this camera. "
-                "For Ring/Nest cloud cameras: Install ring-mqtt add-on and enable livestream, "
-                "then verify the 'stream_source' attribute exists on the camera's Info sensor. "
-                "See https://github.com/LosCV29/ha-video-vision/blob/main/docs/RING_MQTT_SETUP.md for setup guide."
-            )
-
-        # Use provided overrides or fall back to config
-        model = model or self.vllm_model
-        api_key = api_key or self.api_key
+            return self._NO_VIDEO_ERROR
 
         # Warn about free models not supporting video
-        is_free_model = model and ":free" in model.lower()
-        if is_free_model:
+        if model and ":free" in model.lower():
             _LOGGER.warning(
                 "Free models on OpenRouter (%s) do NOT support video input. "
-                "Use Google Gemini (free tier) for video analysis instead.",
-                model
+                "Use Google Gemini (free tier) for video analysis instead.", model
             )
 
-        try:
-            url = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
+        video_b64 = base64.b64encode(video_bytes).decode()
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}},
+                    {"type": "text", "text": prompt}
+                ]}
+            ],
+            "max_tokens": self.vllm_max_tokens,
+            "temperature": self.vllm_temperature,
+            "provider": {"only": ["Google Vertex"]}  # Required for base64 video support
+        }
 
-            content = []
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        result, error = await self._make_ai_request(
+            "https://openrouter.ai/api/v1/chat/completions", payload, headers, provider_name="OpenRouter"
+        )
+        return error if error else self._extract_openai_response(result, "OpenRouter")
 
-            # VIDEO ONLY - no image analysis
-            video_b64 = base64.b64encode(video_bytes).decode()
-            content.append({
-                "type": "video_url",
-                "video_url": {
-                    "url": f"data:video/mp4;base64,{video_b64}"
-                }
-            })
-
-            content.append({"type": "text", "text": prompt})
-
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content}
-                ],
-                "max_tokens": self.vllm_max_tokens,
-                "temperature": self.vllm_temperature,
-                # Force routing through Google Vertex for base64 video support
-                # AI Studio only supports YouTube links, Vertex supports base64
-                "provider": {
-                    "only": ["Google Vertex"]
-                }
-            }
-            
-            async with asyncio.timeout(60):
-                async with self._session.post(url, json=payload, headers=headers) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        # Safely extract content from response
-                        choices = result.get("choices", [])
-                        if not choices:
-                            _LOGGER.warning("OpenRouter returned empty choices: %s", result)
-                            return "No response from AI (empty choices)"
-                        message = choices[0].get("message", {})
-                        content = message.get("content", "")
-                        if not content:
-                            _LOGGER.warning("OpenRouter returned empty content")
-                            return "No description available from AI"
-                        return content
-                    else:
-                        error = await response.text()
-                        _LOGGER.error("OpenRouter error: %s", error[:500])
-                        return f"Analysis failed: {response.status}"
-                        
-        except Exception as e:
-            _LOGGER.error("OpenRouter analysis error: %s", e)
-            return f"Analysis error: {str(e)}"
-
-    async def _analyze_local(self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, system_prompt: str = "") -> str:
+    async def _analyze_local(
+        self, video_bytes: bytes | None, frame_bytes: bytes | None,
+        prompt: str, system_prompt: str
+    ) -> str:
         """Analyze using local vLLM endpoint - VIDEO preferred, image fallback."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
 
-        try:
-            url = f"{self.base_url}/chat/completions"
+        # Build content with video or image fallback
+        content = []
+        if video_bytes:
+            video_b64 = base64.b64encode(video_bytes).decode()
+            content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
+        elif frame_bytes:
+            image_b64 = base64.b64encode(frame_bytes).decode()
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
+        content.append({"type": "text", "text": prompt})
 
-            content = []
+        payload = {
+            "model": self.vllm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ],
+            "max_tokens": self.vllm_max_tokens,
+            "temperature": self.vllm_temperature,
+        }
 
-            # VIDEO ONLY - prefer video, fall back to image for local models that don't support video
-            if video_bytes:
-                video_b64 = base64.b64encode(video_bytes).decode()
-                content.append({
-                    "type": "video_url",
-                    "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}
-                })
-            elif frame_bytes:
-                # Image fallback for local models that don't support video
-                image_b64 = base64.b64encode(frame_bytes).decode()
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
-                })
-
-            content.append({"type": "text", "text": prompt})
-
-            payload = {
-                "model": self.vllm_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content}
-                ],
-                "max_tokens": self.vllm_max_tokens,
-                "temperature": self.vllm_temperature,
-            }
-            
-            async with asyncio.timeout(120):
-                async with self._session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        # Safely extract content from response
-                        choices = result.get("choices", [])
-                        if not choices:
-                            _LOGGER.warning("Local vLLM returned empty choices: %s", result)
-                            return "No response from AI (empty choices)"
-                        message = choices[0].get("message", {})
-                        content = message.get("content", "")
-                        if not content:
-                            _LOGGER.warning("Local vLLM returned empty content")
-                            return "No description available from AI"
-                        return content
-                    else:
-                        error = await response.text()
-                        _LOGGER.error("Local vLLM error: %s", error[:500])
-                        return f"Analysis failed: {response.status}"
-
-        except Exception as e:
-            _LOGGER.error("Local vLLM error: %s", e)
-            return f"Analysis error: {str(e)}"
+        result, error = await self._make_ai_request(
+            f"{self.base_url}/chat/completions", payload, timeout=120, provider_name="Local vLLM"
+        )
+        return error if error else self._extract_openai_response(result, "Local vLLM")
 
     async def identify_faces(
         self, image_path: str, server_url: str, min_confidence: int = 50

@@ -72,6 +72,75 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+# =============================================================================
+# SHARED HELPER FUNCTIONS (used by both ConfigFlow and OptionsFlow)
+# =============================================================================
+
+async def fetch_provider_models(provider: str, config: dict[str, Any]) -> list[dict]:
+    """Fetch available models from provider API.
+
+    Args:
+        provider: Provider identifier (local, google, openrouter)
+        config: Configuration dict containing credentials
+
+    Returns:
+        List of model dicts with 'id' and 'name' keys
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {}
+            if provider == PROVIDER_LOCAL:
+                url = f"{config.get(CONF_VLLM_URL, DEFAULT_VLLM_URL)}/models"
+            elif provider == PROVIDER_GOOGLE:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models?key={config[CONF_API_KEY]}"
+            elif provider == PROVIDER_OPENROUTER:
+                url = "https://openrouter.ai/api/v1/models"
+                headers = {"Authorization": f"Bearer {config[CONF_API_KEY]}"}
+            else:
+                return []
+
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status != 200:
+                    return []
+                data = await response.json()
+                return parse_provider_models(provider, data)
+    except Exception as e:
+        _LOGGER.warning("Failed to fetch models: %s", e)
+        return []
+
+
+def parse_provider_models(provider: str, data: dict) -> list[dict]:
+    """Parse models response based on provider - VIDEO CAPABLE ONLY.
+
+    STRICT filtering: Only models confirmed to support base64 video input.
+    OpenRouter only supports video via Google Vertex, so only Gemini models work.
+    """
+    models = []
+    if provider == PROVIDER_GOOGLE:
+        for model in data.get("models", []):
+            name = model.get("name", "")
+            # Gemini models support video - filter for gemini-2.0, gemini-1.5, gemini-3
+            if any(x in name.lower() for x in ["gemini-2.0", "gemini-1.5", "gemini-exp", "gemini-3"]):
+                model_id = name.replace("models/", "")
+                display_name = model.get("displayName", model_id)
+                models.append({"id": model_id, "name": display_name})
+    elif provider == PROVIDER_OPENROUTER:
+        for model in data.get("data", []):
+            model_id = model.get("id", "")
+            # STRICT: Only Google Gemini models support base64 video via Vertex
+            is_gemini = model_id.startswith("google/gemini-")
+            is_free = ":free" in model_id.lower()
+            if is_gemini and not is_free:
+                name = model.get("name", model_id)
+                models.append({"id": model_id, "name": name})
+    elif provider == PROVIDER_LOCAL:
+        # Local models - show all, user knows their setup
+        for model in data.get("data", []):
+            model_id = model.get("id", "")
+            models.append({"id": model_id, "name": model_id})
+    return models
+
+
 class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HA Video Vision."""
 
@@ -120,7 +189,7 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # Test connection and fetch models
-            models = await self._fetch_models(provider, user_input)
+            models = await fetch_provider_models(provider, user_input)
             if models:
                 self._data.update(user_input)
                 self._data["_available_models"] = models
@@ -183,62 +252,6 @@ class VideoVisionConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "model_count": str(len(models)),
             },
         )
-
-    async def _fetch_models(self, provider: str, config: dict[str, Any]) -> list[dict]:
-        """Fetch available models from provider API."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {}
-                if provider == PROVIDER_LOCAL:
-                    url = f"{config.get(CONF_VLLM_URL, DEFAULT_VLLM_URL)}/models"
-                elif provider == PROVIDER_GOOGLE:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={config[CONF_API_KEY]}"
-                elif provider == PROVIDER_OPENROUTER:
-                    url = "https://openrouter.ai/api/v1/models"
-                    headers = {"Authorization": f"Bearer {config[CONF_API_KEY]}"}
-                else:
-                    return []
-
-                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
-                    if response.status != 200:
-                        return []
-                    data = await response.json()
-                    return self._parse_models(provider, data)
-        except Exception as e:
-            _LOGGER.warning("Failed to fetch models: %s", e)
-            return []
-
-    def _parse_models(self, provider: str, data: dict) -> list[dict]:
-        """Parse models response based on provider - VIDEO CAPABLE ONLY.
-
-        STRICT filtering: Only models confirmed to support base64 video input.
-        OpenRouter only supports video via Google Vertex, so only Gemini models work.
-        """
-        models = []
-        if provider == PROVIDER_GOOGLE:
-            for model in data.get("models", []):
-                name = model.get("name", "")
-                # Gemini models support video - filter for gemini-2.0 and gemini-1.5
-                if any(x in name.lower() for x in ["gemini-2.0", "gemini-1.5", "gemini-exp", "gemini-3"]):
-                    model_id = name.replace("models/", "")
-                    display_name = model.get("displayName", model_id)
-                    models.append({"id": model_id, "name": display_name})
-        elif provider == PROVIDER_OPENROUTER:
-            for model in data.get("data", []):
-                model_id = model.get("id", "")
-                # STRICT: Only Google Gemini models support base64 video via Vertex
-                # Other models claim video support but DON'T work with base64 input
-                is_gemini = model_id.startswith("google/gemini-")
-                is_free = ":free" in model_id.lower()
-
-                if is_gemini and not is_free:
-                    name = model.get("name", model_id)
-                    models.append({"id": model_id, "name": name})
-        elif provider == PROVIDER_LOCAL:
-            for model in data.get("data", []):
-                model_id = model.get("id", "")
-                models.append({"id": model_id, "name": model_id})
-        return models
 
     async def async_step_cameras(
         self, user_input: dict[str, Any] | None = None
@@ -327,6 +340,57 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._entry = config_entry
         self._provider_models: dict[str, list] = {}
+        self._temp_api_key: str = ""
+        self._temp_base_url: str = ""
+
+    def _get_provider_config(self, provider: str) -> dict[str, Any]:
+        """Get configuration for a specific provider."""
+        current = {**self._entry.data, **self._entry.options}
+        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
+        return provider_configs.get(provider, {})
+
+    def _save_provider_config(
+        self, provider: str, model: str, api_key: str = "", base_url: str = ""
+    ) -> FlowResult:
+        """Save provider configuration and return entry."""
+        current = {**self._entry.data, **self._entry.options}
+        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
+        new_configs = {**provider_configs}
+
+        config = {"model": model}
+        if api_key:
+            config["api_key"] = api_key
+        if base_url:
+            config["base_url"] = base_url
+        if provider == PROVIDER_LOCAL:
+            config["api_key"] = ""  # Local doesn't need API key
+
+        new_configs[provider] = config
+        new_options = {**self._entry.options, CONF_PROVIDER_CONFIGS: new_configs}
+        return self.async_create_entry(title="", data=new_options)
+
+    def _build_model_selection_form(
+        self, step_id: str, provider: str, models: list[dict]
+    ) -> FlowResult:
+        """Build model selection form for a provider."""
+        provider_config = self._get_provider_config(provider)
+        model_options = [
+            selector.SelectOptionDict(value=m["id"], label=m["name"])
+            for m in models[:50]
+        ]
+        current_model = provider_config.get("model", PROVIDER_DEFAULT_MODELS.get(provider, ""))
+
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema({
+                vol.Required(CONF_VLLM_MODEL, default=current_model): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=model_options,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }),
+        )
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -410,7 +474,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             api_key = user_input.get(CONF_API_KEY, "")
             if api_key:
                 # Fetch models
-                models = await self._fetch_models(PROVIDER_GOOGLE, {CONF_API_KEY: api_key})
+                models = await fetch_provider_models(PROVIDER_GOOGLE, {CONF_API_KEY: api_key})
                 if models:
                     self._provider_models[PROVIDER_GOOGLE] = models
                     self._temp_api_key = api_key
@@ -436,39 +500,16 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Select Google model."""
-        models = self._provider_models.get(PROVIDER_GOOGLE, [])
-        current = {**self._entry.data, **self._entry.options}
-        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
-        google_config = provider_configs.get(PROVIDER_GOOGLE, {})
-
         if user_input is not None:
-            # Save config
-            new_configs = {**provider_configs}
-            new_configs[PROVIDER_GOOGLE] = {
-                "api_key": getattr(self, '_temp_api_key', google_config.get("api_key", "")),
-                "model": user_input.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS[PROVIDER_GOOGLE]),
-            }
-            new_options = {**self._entry.options, CONF_PROVIDER_CONFIGS: new_configs}
-            return self.async_create_entry(title="", data=new_options)
+            google_config = self._get_provider_config(PROVIDER_GOOGLE)
+            return self._save_provider_config(
+                PROVIDER_GOOGLE,
+                user_input.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS[PROVIDER_GOOGLE]),
+                api_key=self._temp_api_key or google_config.get("api_key", ""),
+            )
 
-        model_options = [
-            selector.SelectOptionDict(value=m["id"], label=m["name"])
-            for m in models[:50]
-        ]
-
-        current_model = google_config.get("model", PROVIDER_DEFAULT_MODELS[PROVIDER_GOOGLE])
-
-        return self.async_show_form(
-            step_id="google_model",
-            data_schema=vol.Schema({
-                vol.Required(CONF_VLLM_MODEL, default=current_model): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=model_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-            }),
-        )
+        models = self._provider_models.get(PROVIDER_GOOGLE, [])
+        return self._build_model_selection_form("google_model", PROVIDER_GOOGLE, models)
 
     # ==================== OPENROUTER ====================
     async def async_step_configure_openrouter(
@@ -483,7 +524,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             api_key = user_input.get(CONF_API_KEY, "")
             if api_key:
-                models = await self._fetch_models(PROVIDER_OPENROUTER, {CONF_API_KEY: api_key})
+                models = await fetch_provider_models(PROVIDER_OPENROUTER, {CONF_API_KEY: api_key})
                 if models:
                     self._provider_models[PROVIDER_OPENROUTER] = models
                     self._temp_api_key = api_key
@@ -508,38 +549,16 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Select OpenRouter model."""
-        models = self._provider_models.get(PROVIDER_OPENROUTER, [])
-        current = {**self._entry.data, **self._entry.options}
-        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
-        or_config = provider_configs.get(PROVIDER_OPENROUTER, {})
-
         if user_input is not None:
-            new_configs = {**provider_configs}
-            new_configs[PROVIDER_OPENROUTER] = {
-                "api_key": getattr(self, '_temp_api_key', or_config.get("api_key", "")),
-                "model": user_input.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS[PROVIDER_OPENROUTER]),
-            }
-            new_options = {**self._entry.options, CONF_PROVIDER_CONFIGS: new_configs}
-            return self.async_create_entry(title="", data=new_options)
+            or_config = self._get_provider_config(PROVIDER_OPENROUTER)
+            return self._save_provider_config(
+                PROVIDER_OPENROUTER,
+                user_input.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS[PROVIDER_OPENROUTER]),
+                api_key=self._temp_api_key or or_config.get("api_key", ""),
+            )
 
-        model_options = [
-            selector.SelectOptionDict(value=m["id"], label=m["name"])
-            for m in models[:50]
-        ]
-
-        current_model = or_config.get("model", PROVIDER_DEFAULT_MODELS[PROVIDER_OPENROUTER])
-
-        return self.async_show_form(
-            step_id="openrouter_model",
-            data_schema=vol.Schema({
-                vol.Required(CONF_VLLM_MODEL, default=current_model): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=model_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-            }),
-        )
+        models = self._provider_models.get(PROVIDER_OPENROUTER, [])
+        return self._build_model_selection_form("openrouter_model", PROVIDER_OPENROUTER, models)
 
     # ==================== LOCAL VLLM ====================
     async def async_step_configure_local(
@@ -554,7 +573,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             base_url = user_input.get(CONF_VLLM_URL, "")
             if base_url:
-                models = await self._fetch_models(PROVIDER_LOCAL, {CONF_VLLM_URL: base_url})
+                models = await fetch_provider_models(PROVIDER_LOCAL, {CONF_VLLM_URL: base_url})
                 if models:
                     self._provider_models[PROVIDER_LOCAL] = models
                     self._temp_base_url = base_url
@@ -579,97 +598,16 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Select Local model."""
-        models = self._provider_models.get(PROVIDER_LOCAL, [])
-        current = {**self._entry.data, **self._entry.options}
-        provider_configs = current.get(CONF_PROVIDER_CONFIGS, {})
-        local_config = provider_configs.get(PROVIDER_LOCAL, {})
-
         if user_input is not None:
-            new_configs = {**provider_configs}
-            new_configs[PROVIDER_LOCAL] = {
-                "base_url": getattr(self, '_temp_base_url', local_config.get("base_url", DEFAULT_VLLM_URL)),
-                "model": user_input.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS[PROVIDER_LOCAL]),
-                "api_key": "",  # Local doesn't need API key
-            }
-            new_options = {**self._entry.options, CONF_PROVIDER_CONFIGS: new_configs}
-            return self.async_create_entry(title="", data=new_options)
+            local_config = self._get_provider_config(PROVIDER_LOCAL)
+            return self._save_provider_config(
+                PROVIDER_LOCAL,
+                user_input.get(CONF_VLLM_MODEL, PROVIDER_DEFAULT_MODELS[PROVIDER_LOCAL]),
+                base_url=self._temp_base_url or local_config.get("base_url", DEFAULT_VLLM_URL),
+            )
 
-        model_options = [
-            selector.SelectOptionDict(value=m["id"], label=m["name"])
-            for m in models[:50]
-        ]
-
-        current_model = local_config.get("model", PROVIDER_DEFAULT_MODELS[PROVIDER_LOCAL])
-
-        return self.async_show_form(
-            step_id="local_model",
-            data_schema=vol.Schema({
-                vol.Required(CONF_VLLM_MODEL, default=current_model): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=model_options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-            }),
-        )
-
-    # ==================== SHARED HELPERS ====================
-    async def _fetch_models(self, provider: str, config: dict[str, Any]) -> list[dict]:
-        """Fetch available models from provider API."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {}
-                if provider == PROVIDER_LOCAL:
-                    url = f"{config.get(CONF_VLLM_URL, DEFAULT_VLLM_URL)}/models"
-                elif provider == PROVIDER_GOOGLE:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={config[CONF_API_KEY]}"
-                elif provider == PROVIDER_OPENROUTER:
-                    url = "https://openrouter.ai/api/v1/models"
-                    headers = {"Authorization": f"Bearer {config[CONF_API_KEY]}"}
-                else:
-                    return []
-
-                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
-                    if response.status != 200:
-                        return []
-                    data = await response.json()
-                    return self._parse_models(provider, data)
-        except Exception as e:
-            _LOGGER.warning("Failed to fetch models: %s", e)
-            return []
-
-    def _parse_models(self, provider: str, data: dict) -> list[dict]:
-        """Parse models response based on provider - VIDEO CAPABLE ONLY.
-
-        STRICT filtering: Only models confirmed to support base64 video input.
-        OpenRouter only supports video via Google Vertex, so only Gemini models work.
-        """
-        models = []
-        if provider == PROVIDER_GOOGLE:
-            for model in data.get("models", []):
-                name = model.get("name", "")
-                # Gemini models support video - filter for gemini-2.0, gemini-1.5, gemini-3
-                if any(x in name.lower() for x in ["gemini-2.0", "gemini-1.5", "gemini-exp", "gemini-3"]):
-                    model_id = name.replace("models/", "")
-                    display_name = model.get("displayName", model_id)
-                    models.append({"id": model_id, "name": display_name})
-        elif provider == PROVIDER_OPENROUTER:
-            for model in data.get("data", []):
-                model_id = model.get("id", "")
-                # STRICT: Only Google Gemini models support base64 video via Vertex
-                # Other models claim video support but DON'T work with base64 input
-                is_gemini = model_id.startswith("google/gemini-")
-                is_free = ":free" in model_id.lower()
-
-                if is_gemini and not is_free:
-                    name = model.get("name", model_id)
-                    models.append({"id": model_id, "name": name})
-        elif provider == PROVIDER_LOCAL:
-            # Local models - show all, user knows their setup
-            for model in data.get("data", []):
-                model_id = model.get("id", "")
-                models.append({"id": model_id, "name": model_id})
-        return models
+        models = self._provider_models.get(PROVIDER_LOCAL, [])
+        return self._build_model_selection_form("local_model", PROVIDER_LOCAL, models)
 
     # ==================== OTHER OPTIONS ====================
     async def async_step_cameras(
