@@ -1388,17 +1388,21 @@ class VideoAnalyzer:
                             p for p in all_people
                             if p.get("name") != "Unknown" and p.get("confidence", 0) >= min_confidence
                         ]
-                        # Use server's summary if it has identified faces, otherwise use client-filtered list
+                        # Use server's summary directly if it contains identified faces
                         # Server summary respects server-side thresholding (useful for ensemble mode)
                         server_summary = result.get("summary", "")
-                        no_faces_phrases = ["no faces", "no known faces", ""]
-                        use_server_summary = server_summary and not any(
-                            phrase in server_summary.lower() for phrase in no_faces_phrases
+                        # Check if server found faces (summary not empty and not a "no faces" message)
+                        has_server_faces = server_summary and not any(
+                            phrase in server_summary.lower()
+                            for phrase in ["no faces", "no known faces", "unknown"]
                         )
-                        summary = server_summary if use_server_summary else (
-                            ", ".join([f"{p['name']} ({p['confidence']}%)" for p in identified_people])
-                            if identified_people else "No known faces"
-                        )
+                        # Use server summary if it has faces, otherwise use client-filtered list
+                        if has_server_faces:
+                            summary = server_summary
+                        elif identified_people:
+                            summary = ", ".join([f"{p['name']} ({p['confidence']}%)" for p in identified_people])
+                        else:
+                            summary = "No known faces"
                         return {
                             "success": True,
                             "faces_detected": result.get("faces_detected", 0),
