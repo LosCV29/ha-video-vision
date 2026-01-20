@@ -401,18 +401,18 @@ class VideoAnalyzer:
         # Camera contexts for natural responses
         self.camera_contexts = config.get(CONF_CAMERA_CONTEXTS, DEFAULT_CAMERA_CONTEXTS)
 
-        # Video settings
-        self.video_duration = config.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION)
-        self.video_width = config.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH)
-        self.video_fps_percent = config.get(CONF_VIDEO_FPS_PERCENT, DEFAULT_VIDEO_FPS_PERCENT)
+        # Video settings (ensure int type for arithmetic operations)
+        self.video_duration = int(config.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION))
+        self.video_width = int(config.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH))
+        self.video_fps_percent = int(config.get(CONF_VIDEO_FPS_PERCENT, DEFAULT_VIDEO_FPS_PERCENT))
         # Frame position for notification image (0=first, 50=middle, 100=last)
         self.notification_frame_position = config.get(
             CONF_NOTIFICATION_FRAME_POSITION, DEFAULT_NOTIFICATION_FRAME_POSITION
         )
 
-        # Snapshot settings
+        # Snapshot settings (ensure int type for quality calculations)
         self.snapshot_dir = config.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)
-        self.snapshot_quality = config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)
+        self.snapshot_quality = int(config.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY))
 
         _LOGGER.info(
             "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp, FPS: %d%%",
@@ -429,6 +429,16 @@ class VideoAnalyzer:
         Returns: (provider, model, api_key)
         """
         return (self.provider, self.vllm_model, self.api_key)
+
+    def _get_ffmpeg_quality(self) -> str:
+        """Convert snapshot_quality (50-100) to FFmpeg JPEG quality (31-1).
+
+        FFmpeg -q:v scale: 1 = best quality, 31 = worst quality
+        Our scale: 50 = medium, 100 = best
+        """
+        # Linear mapping: 100 -> 1, 50 -> 31
+        ffmpeg_q = max(1, min(31, int((100 - self.snapshot_quality) * 0.6 + 1)))
+        return str(ffmpeg_q)
 
     def _normalize_name(self, name: str) -> str:
         """Normalize a name for comparison (lowercase, remove special chars)."""
@@ -801,7 +811,7 @@ class VideoAnalyzer:
             "-i", stream_url,
             "-frames:v", "1",
             "-vf", f"scale={self.video_width}:-2",
-            "-q:v", "2",
+            "-q:v", self._get_ffmpeg_quality(),
             output_path
         ])
 
@@ -952,7 +962,7 @@ class VideoAnalyzer:
                 frame_time = duration * (frame_position / 100)
                 frame_cmd = [
                     "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
-                    "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", frame_path
+                    "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", frame_path
                 ]
                 frame_proc = await asyncio.create_subprocess_exec(
                     *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
@@ -967,7 +977,7 @@ class VideoAnalyzer:
                     face_rec_frame_time = duration * (facial_recognition_frame_position / 100)
                     face_rec_cmd = [
                         "ffmpeg", "-y", "-ss", str(face_rec_frame_time), "-i", video_path,
-                        "-frames:v", "1", "-q:v", "2", "-f", "mjpeg", face_rec_frame_path
+                        "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", face_rec_frame_path
                     ]
                     face_rec_proc = await asyncio.create_subprocess_exec(
                         *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL

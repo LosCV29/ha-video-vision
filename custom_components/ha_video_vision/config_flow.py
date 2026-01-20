@@ -812,7 +812,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_VIDEO_DURATION, default=current.get(CONF_VIDEO_DURATION, DEFAULT_VIDEO_DURATION)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=10, step=1, unit_of_measurement="seconds", mode=selector.NumberSelectorMode.SLIDER)
                 ),
-                vol.Required(CONF_VIDEO_WIDTH, default=str(current.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH))): selector.SelectSelector(
+                vol.Required(CONF_VIDEO_WIDTH, default=str(current.get(CONF_VIDEO_WIDTH) or DEFAULT_VIDEO_WIDTH)): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
                             {"label": "480 (fast, low detail)", "value": "480"},
@@ -826,7 +826,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Required(CONF_VIDEO_FPS_PERCENT, default=str(current.get(CONF_VIDEO_FPS_PERCENT, DEFAULT_VIDEO_FPS_PERCENT))): selector.SelectSelector(
+                vol.Required(CONF_VIDEO_FPS_PERCENT, default=str(current.get(CONF_VIDEO_FPS_PERCENT) or DEFAULT_VIDEO_FPS_PERCENT)): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
                             {"label": "25% (smaller files)", "value": "25"},
