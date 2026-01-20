@@ -134,12 +134,14 @@
         }
       },
       "video_quality": {
-        "title": "Video Quality",
+        "title": "Video Settings",
         "description": "Configure recording and snapshot settings",
         "data": {
           "video_duration": "Recording Duration",
           "video_width": "Resolution",
+          "video_fps_percent": "Frame Rate",
           "snapshot_quality": "Snapshot Quality",
+          "notification_frame_position": "Notification Frame Position (0%=start, 50%=middle, 100%=end)",
           "snapshot_dir": "Snapshot Directory"
         }
       },

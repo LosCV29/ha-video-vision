@@ -47,9 +47,11 @@ from .const import (
     CONF_VIDEO_DURATION,
     CONF_VIDEO_WIDTH,
     CONF_VIDEO_FPS_PERCENT,
+    CONF_NOTIFICATION_FRAME_POSITION,
     DEFAULT_VIDEO_DURATION,
     DEFAULT_VIDEO_WIDTH,
     DEFAULT_VIDEO_FPS_PERCENT,
+    DEFAULT_NOTIFICATION_FRAME_POSITION,
     # Snapshot
     CONF_SNAPSHOT_DIR,
     CONF_SNAPSHOT_QUALITY,
@@ -839,6 +841,9 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Required(CONF_SNAPSHOT_QUALITY, default=current.get(CONF_SNAPSHOT_QUALITY, DEFAULT_SNAPSHOT_QUALITY)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=50, max=100, step=5, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER)
+                ),
+                vol.Required(CONF_NOTIFICATION_FRAME_POSITION, default=current.get(CONF_NOTIFICATION_FRAME_POSITION, DEFAULT_NOTIFICATION_FRAME_POSITION)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=10, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER)
                 ),
                 vol.Optional(CONF_SNAPSHOT_DIR, default=current.get(CONF_SNAPSHOT_DIR, DEFAULT_SNAPSHOT_DIR)): str,
             }),

@@ -135,7 +135,7 @@ class VideoVisionTimeline(CalendarEntity):
     def _cleanup_old_events(self) -> None:
         """Remove events older than retention period."""
         retention_days = self._get_retention_days()
-        cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+        cutoff = (dt_util.now() - timedelta(days=retention_days)).isoformat()
 
         conn = sqlite3.connect(self._db_path)
         try:
@@ -268,7 +268,6 @@ class VideoVisionTimeline(CalendarEntity):
     async def async_update(self) -> None:
         """Update the calendar entity with the most recent event."""
         def _get_current():
-            now = datetime.now().isoformat()
             conn = sqlite3.connect(self._db_path)
             conn.row_factory = sqlite3.Row
             try:
