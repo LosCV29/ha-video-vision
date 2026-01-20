@@ -140,7 +140,7 @@
       },
       "facial_recognition": {
         "title": "Facial Recognition",
-        "description": "LLM-based facial recognition using reference photos. {directory_hint}",
+        "description": "LLM-based facial recognition. Store reference photos in subfolders per person (e.g., /config/camera_faces/Carlos/).",
         "data": {
           "facial_recognition_enabled": "Enable Facial Recognition",
           "facial_recognition_directory": "Reference Photos Directory"
