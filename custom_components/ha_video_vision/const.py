@@ -99,15 +99,13 @@ DEFAULT_SNAPSHOT_DIR: Final = "/media/ha_video_vision"
 DEFAULT_SNAPSHOT_QUALITY: Final = 85  # JPEG quality 1-100
 
 # =============================================================================
-# FACIAL RECOGNITION
+# FACIAL RECOGNITION (LLM-based with reference photos)
 # =============================================================================
-CONF_FACIAL_RECOGNITION_URL: Final = "facial_recognition_url"
 CONF_FACIAL_RECOGNITION_ENABLED: Final = "facial_recognition_enabled"
-CONF_FACIAL_RECOGNITION_CONFIDENCE: Final = "facial_recognition_confidence"
+CONF_FACIAL_RECOGNITION_DIRECTORY: Final = "facial_recognition_directory"
 
-DEFAULT_FACIAL_RECOGNITION_URL: Final = "http://localhost:8100"
 DEFAULT_FACIAL_RECOGNITION_ENABLED: Final = False
-DEFAULT_FACIAL_RECOGNITION_CONFIDENCE: Final = 35  # Lowered for ensemble mode (1/3 votes often ~40-50%)
+DEFAULT_FACIAL_RECOGNITION_DIRECTORY: Final = "/config/camera_faces"  # Directory with subfolders per person
 
 # =============================================================================
 # TIMELINE (Calendar-based event history)

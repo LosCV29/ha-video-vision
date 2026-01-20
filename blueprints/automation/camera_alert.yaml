@@ -3,7 +3,7 @@ blueprint:
   description: >
     When person is detected, record video, run AI analysis,
     and send mobile notifications with snapshot. Optionally identify
-    known faces using the Facial Recognition add-on.
+    known faces using LLM-based facial recognition (compares against reference photos).
     Works with iOS and Android via Nabu Casa.
   domain: automation
   author: "HA Video Vision Integration"
@@ -98,13 +98,35 @@ blueprint:
           step: 1
           unit_of_measurement: "s"
 
-    # Facial Recognition
+    frame_position:
+      name: "Notification Frame Position (%)"
+      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame."
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 10
+          unit_of_measurement: "%"
+
+    # Facial Recognition (LLM-based)
     facial_recognition_enabled:
       name: "Enable Facial Recognition"
-      description: "Identify known faces using the Facial Recognition add-on. Configure the server URL in the integration settings."
+      description: "Identify known faces using LLM-based recognition. Store reference photos in the directory configured in integration settings (e.g., /config/camera_faces/PersonName/)."
       default: false
       selector:
         boolean:
+
+    facial_recognition_frame_position:
+      name: "Facial Recognition Frame Position (%)"
+      description: "Which frame to use for facial recognition. SEPARATE from notification image. Use 50% (middle) or higher to capture faces after people have walked closer to the camera."
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 10
+          unit_of_measurement: "%"
 
     # Timeline
     save_to_timeline:
@@ -127,10 +149,12 @@ variables:
   time_start: !input notify_start
   time_end: !input notify_end
   delay_seconds: !input capture_delay
+  frame_pos: !input frame_position
   face_rec_enabled: !input facial_recognition_enabled
+  face_rec_frame_pos: !input facial_recognition_frame_position
   timeline_enabled: !input save_to_timeline
-  # Default prompt - reports ALL people/vehicles/animals whether moving or stationary
-  default_prompt: "IMPORTANT: Scan the ENTIRE frame carefully, including background, edges, and shadows. Report ANY people visible, no matter how small or distant. Report ALL vehicles present. For people, describe their location, appearance and actions. For animals, identify the type and behavior. For vehicles, note type, color, and position. Only say 'No activity observed' if the frame is completely empty of people, animals, and vehicles. 2-3 sentences max."
+  # Default prompt - reports ALL people/vehicles whether moving or stationary
+  default_prompt: "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. Report ANY people visible - even if small, distant, partially obscured, or at the edges of frame. Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. Ignore parked cars and static structures. Be concise (2-3 sentences)."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}
@@ -161,15 +185,18 @@ action:
       - delay:
           seconds: "{{ delay_seconds }}"
 
-  # Analyze camera with prompt - uses integration's video_duration setting
-  # Recording starts INSTANTLY when delay is 0
+  # Analyze camera with prompt - VIDEO ONLY analysis
+  # Frame position determines which video frame is used for notification image
+  # Facial recognition uses a separate frame position for better face capture
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
       # Duration omitted - uses integration's configured video_duration for consistent recording length
       user_query: "{{ user_prompt if user_prompt else default_prompt }}"
       facial_recognition: "{{ face_rec_enabled }}"
+      facial_recognition_frame_position: "{{ face_rec_frame_pos }}"
       remember: "{{ timeline_enabled }}"
+      frame_position: "{{ frame_pos }}"
     response_variable: result
 
   # Send notifications if successful
@@ -183,11 +210,10 @@ action:
               notification_title: "{{ custom_title if custom_title else result.friendly_name }}"
               # Include facial recognition results in message if available
               notification_message: >
-                {% set desc = result.description | default('Motion detected on camera') %}
-                {% set face_rec = result.face_recognition | default({}) %}
-                {% set face_summary = face_rec.summary | default('') %}
-                {% if face_rec.success | default(false) and face_summary and face_summary != 'No known faces' %}
-                  {{ face_summary }} - {{ desc }}
+                {% set desc = result.description if result.description else 'Motion detected on camera' %}
+                {% set face_rec = result.get('face_recognition', {}) %}
+                {% if face_rec.get('success') and face_rec.get('summary') and face_rec.get('summary') != 'No known faces' %}
+                  {{ face_rec.summary }} - {{ desc }}
                 {% else %}
                   {{ desc }}
                 {% endif %}
@@ -211,9 +237,10 @@ action:
                       # Priority
                       ttl: 0
                       priority: high
-                      # Android
+                      # Android - bigText style prevents text cutoff
                       channel: "ha_video_vision"
                       sticky: true
+                      style: big_text
                       # iOS
                       attachment:
                         url: "{{ result.snapshot_url }}"
