@@ -135,3 +135,20 @@ ATTR_FACIAL_RECOGNITION: Final = "facial_recognition"
 ATTR_FACIAL_RECOGNITION_FRAME_POSITION: Final = "facial_recognition_frame_position"
 ATTR_REMEMBER: Final = "remember"
 ATTR_FRAME_POSITION: Final = "frame_position"
+
+# =============================================================================
+# DETECTION KEYWORDS (for AI response parsing)
+# =============================================================================
+PERSON_KEYWORDS: Final = (
+    "person", "people", "someone", "man", "woman", "child",
+    "individual", "adult", "figure", "pedestrian", "walker",
+    "visitor", "delivery", "carrier", "walking", "standing",
+    "approaching", "leaving", "human", "resident", "guest"
+)
+
+ANIMAL_KEYWORDS: Final = (
+    "dog", "cat", "pet", "animal", "puppy", "kitten",
+    "canine", "feline", "bird", "squirrel", "rabbit",
+    "deer", "raccoon", "fox", "coyote", "wildlife",
+    "creature", "critter", "hound", "pup", "kitty"
+)
