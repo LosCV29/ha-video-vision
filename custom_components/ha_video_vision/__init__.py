@@ -1258,12 +1258,13 @@ class VideoAnalyzer:
                 "If unsure, describe what you see without assuming identities."
             )
         else:
-            # Default prompt without context (original behavior)
+            # Default prompt - modeled after LLM Vision's effective approach
             return (
-                "You are a security camera analyst. Describe ONLY what you can actually see. "
-                "NEVER identify or name specific people. NEVER guess identities. "
-                "Only describe physical characteristics like 'a person in a red shirt' or 'an adult'. "
-                "Do not make up names, do not say 'the homeowner', do not assume who anyone is."
+                "Analyze the image and give a concise, objective event summary. "
+                "Focus on people, pets, and vehicles - scan the ENTIRE frame including background, "
+                "edges, and distant areas. Report ANY people visible no matter how small. "
+                "Track movement and activity. Describe physical characteristics only - "
+                "never assume identities. Be accurate and factual."
             )
 
     async def _analyze_with_provider(

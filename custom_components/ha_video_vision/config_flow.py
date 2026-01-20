@@ -848,7 +848,15 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 ),
                 vol.Required(CONF_VIDEO_WIDTH, default=str(current.get(CONF_VIDEO_WIDTH, DEFAULT_VIDEO_WIDTH))): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[{"label": "480p", "value": "480"}, {"label": "640p", "value": "640"}, {"label": "720p", "value": "720"}, {"label": "1080p", "value": "1080"}],
+                        options=[
+                            {"label": "480 (fast, low detail)", "value": "480"},
+                            {"label": "640 (SD)", "value": "640"},
+                            {"label": "720 (HD)", "value": "720"},
+                            {"label": "1080 (Full HD)", "value": "1080"},
+                            {"label": "1280 (recommended)", "value": "1280"},
+                            {"label": "1440 (2K)", "value": "1440"},
+                            {"label": "1920 (max detail)", "value": "1920"},
+                        ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
