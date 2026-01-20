@@ -15,6 +15,8 @@ from typing import Any
 import aiofiles
 import aiohttp
 import voluptuous as vol
+from io import BytesIO
+from PIL import Image
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -1353,7 +1355,30 @@ class VideoAnalyzer:
         )
         return error if error else self._extract_openai_response(result, "Local vLLM")
 
-    async def _load_reference_photos(self) -> dict[str, list[bytes]]:
+    def _scan_reference_directories(self, faces_dir: Path, max_photos: int = 3) -> dict[str, list[Path]]:
+        """Scan reference photo directories synchronously (for use with asyncio.to_thread).
+
+        Returns: {"PersonName": [Path(...), ...], ...}
+        """
+        result: dict[str, list[Path]] = {}
+        image_extensions = {".jpg", ".jpeg", ".png", ".webp"}
+
+        for person_dir in faces_dir.iterdir():
+            if not person_dir.is_dir():
+                continue
+
+            person_name = person_dir.name
+            image_files = sorted([
+                f for f in person_dir.iterdir()
+                if f.suffix.lower() in image_extensions
+            ])[:max_photos]
+
+            if image_files:
+                result[person_name] = image_files
+
+        return result
+
+    async def _load_reference_photos(self, max_photos_per_person: int = 3) -> dict[str, list[bytes]]:
         """Load reference photos from the facial recognition directory.
 
         Directory structure: /config/camera_faces/PersonName/*.jpg
@@ -1370,21 +1395,14 @@ class VideoAnalyzer:
             return reference_photos
 
         try:
-            # Each subfolder is a person's name
-            for person_dir in faces_dir.iterdir():
-                if not person_dir.is_dir():
-                    continue
+            # Scan directories in a thread to avoid blocking the event loop
+            person_files = await asyncio.to_thread(
+                self._scan_reference_directories, faces_dir, max_photos_per_person
+            )
 
-                person_name = person_dir.name
+            # Load photo bytes asynchronously
+            for person_name, image_files in person_files.items():
                 photos = []
-
-                # Load all image files for this person (limit to 3 for API efficiency)
-                image_extensions = {".jpg", ".jpeg", ".png", ".webp"}
-                image_files = sorted([
-                    f for f in person_dir.iterdir()
-                    if f.suffix.lower() in image_extensions
-                ])[:3]  # Limit to 3 photos per person
-
                 for img_path in image_files:
                     try:
                         async with aiofiles.open(img_path, 'rb') as f:
@@ -1435,8 +1453,16 @@ class VideoAnalyzer:
             async with aiofiles.open(image_path, 'rb') as f:
                 camera_image = await f.read()
 
+            # Determine provider to set appropriate photo limits
+            # Local vLLM has smaller context windows, so limit photos to avoid token overflow
+            effective_provider, _, _ = self._get_effective_provider()
+            if effective_provider == PROVIDER_LOCAL:
+                max_photos = 1  # Local models have ~24k token limit
+            else:
+                max_photos = 3  # Cloud providers have larger context windows
+
             # Load reference photos
-            reference_photos = await self._load_reference_photos()
+            reference_photos = await self._load_reference_photos(max_photos_per_person=max_photos)
             if not reference_photos:
                 _LOGGER.warning("No reference photos found in %s", self.facial_recognition_directory)
                 return {
@@ -1594,24 +1620,61 @@ class VideoAnalyzer:
         response_text = self._extract_openai_response(result, "OpenRouter")
         return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
 
+    def _resize_image_for_local(self, image_bytes: bytes, max_size: int = 512) -> bytes:
+        """Resize image to reduce token count for local vLLM.
+
+        Local models have smaller context windows, so we resize images to fit more
+        reference photos while staying under the token limit.
+        """
+        try:
+            img = Image.open(BytesIO(image_bytes))
+            # Convert to RGB if necessary (handles RGBA, P modes, etc.)
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+
+            # Resize maintaining aspect ratio
+            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+            # Save as JPEG with moderate quality
+            output = BytesIO()
+            img.save(output, format='JPEG', quality=75)
+            return output.getvalue()
+        except Exception as e:
+            _LOGGER.debug("Failed to resize image: %s, using original", e)
+            return image_bytes
+
     async def _identify_faces_local(
         self, camera_image: bytes, reference_photos: dict[str, list[bytes]],
         system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
         """Identify faces using local vLLM endpoint."""
-        # Build content array with reference photos and camera image
+        # Local vLLM has limited context (~24k tokens), so we need to:
+        # 1. Limit number of people to 4 max
+        # 2. Resize images to reduce token usage
+        MAX_PEOPLE = 4
+        limited_photos = dict(list(reference_photos.items())[:MAX_PEOPLE])
+
+        if len(reference_photos) > MAX_PEOPLE:
+            _LOGGER.warning(
+                "Local vLLM: Limiting facial recognition to %d of %d people to avoid token overflow",
+                MAX_PEOPLE, len(reference_photos)
+            )
+
+        # Build content array with resized reference photos and camera image
         content = []
 
-        # Add reference photos with labels
-        for person_name, photos in reference_photos.items():
+        # Add reference photos with labels (resized for token efficiency)
+        for person_name, photos in limited_photos.items():
             content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
             for photo in photos:
-                photo_b64 = base64.b64encode(photo).decode()
+                resized = await asyncio.to_thread(self._resize_image_for_local, photo)
+                photo_b64 = base64.b64encode(resized).decode()
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
 
-        # Add the camera image to analyze
+        # Add the camera image to analyze (also resized)
         content.append({"type": "text", "text": "\nNow analyze this camera image and identify any matching people:"})
-        camera_b64 = base64.b64encode(camera_image).decode()
+        resized_camera = await asyncio.to_thread(self._resize_image_for_local, camera_image)
+        camera_b64 = base64.b64encode(resized_camera).decode()
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{camera_b64}"}})
 
         payload = {
@@ -1632,7 +1695,7 @@ class VideoAnalyzer:
             return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
 
         response_text = self._extract_openai_response(result, "Local vLLM")
-        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+        return self._parse_face_recognition_response(response_text, list(limited_photos.keys()))
 
     def _parse_face_recognition_response(
         self, response_text: str, known_people: list[str]
