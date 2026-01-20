@@ -342,6 +342,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
         self._provider_models: dict[str, list] = {}
         self._temp_api_key: str = ""
         self._temp_base_url: str = ""
+        self._selected_context_camera: str = ""
 
     def _get_provider_config(self, provider: str) -> dict[str, Any]:
         """Get configuration for a specific provider."""
@@ -699,7 +700,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
     async def async_step_camera_context(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle camera context configuration for natural responses."""
+        """Handle camera context selection - dropdown to pick a camera."""
         current = {**self._entry.data, **self._entry.options}
         selected_cameras = current.get(CONF_SELECTED_CAMERAS, [])
         camera_contexts = current.get(CONF_CAMERA_CONTEXTS, DEFAULT_CAMERA_CONTEXTS)
@@ -708,59 +709,86 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="no_cameras_selected")
 
         if user_input is not None:
-            # Parse the context text into a dictionary
-            new_contexts = {}
-            context_text = user_input.get("context_config", "")
+            selected_camera = user_input.get("selected_camera", "")
+            if selected_camera:
+                self._selected_context_camera = selected_camera
+                return await self.async_step_camera_context_edit()
 
-            current_camera = None
-            current_context_lines = []
-
-            for line in context_text.split("\n"):
-                # Check if this is a camera header (starts with camera.)
-                stripped = line.strip()
-                if stripped.startswith("camera.") and stripped.endswith(":"):
-                    # Save previous camera context if any
-                    if current_camera and current_context_lines:
-                        new_contexts[current_camera] = "\n".join(current_context_lines).strip()
-                    # Start new camera
-                    current_camera = stripped.rstrip(":")
-                    current_context_lines = []
-                elif current_camera and stripped:
-                    # Add context line for current camera
-                    current_context_lines.append(stripped)
-
-            # Save last camera context
-            if current_camera and current_context_lines:
-                new_contexts[current_camera] = "\n".join(current_context_lines).strip()
-
-            new_options = {**self._entry.options, CONF_CAMERA_CONTEXTS: new_contexts}
-            return self.async_create_entry(title="", data=new_options)
-
-        # Build current context text from saved contexts
-        context_lines = []
+        # Build camera options with context indicators
+        camera_options = []
+        cameras_with_context = 0
         for entity_id in selected_cameras:
             state = self.hass.states.get(entity_id)
             friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
-            context_lines.append(f"{entity_id}:")
-            if entity_id in camera_contexts:
-                # Add existing context indented
-                for ctx_line in camera_contexts[entity_id].split("\n"):
-                    context_lines.append(f"  {ctx_line}")
+            has_context = entity_id in camera_contexts and camera_contexts[entity_id].strip()
+            if has_context:
+                cameras_with_context += 1
+                label = f"{friendly_name} ({entity_id}) [Has Context]"
             else:
-                context_lines.append(f"  # Add context for {friendly_name}")
-            context_lines.append("")  # Empty line between cameras
-
-        context_text = "\n".join(context_lines)
+                label = f"{friendly_name} ({entity_id})"
+            camera_options.append(
+                selector.SelectOptionDict(value=entity_id, label=label)
+            )
 
         return self.async_show_form(
             step_id="camera_context",
             data_schema=vol.Schema({
-                vol.Optional("context_config", default=context_text): selector.TextSelector(
-                    selector.TextSelectorConfig(multiline=True)
+                vol.Required("selected_camera"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=camera_options,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
                 ),
             }),
             description_placeholders={
                 "camera_count": str(len(selected_cameras)),
+                "context_count": str(cameras_with_context),
+            },
+        )
+
+    async def async_step_camera_context_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Edit context for a specific camera."""
+        current = {**self._entry.data, **self._entry.options}
+        camera_contexts = current.get(CONF_CAMERA_CONTEXTS, DEFAULT_CAMERA_CONTEXTS)
+        entity_id = self._selected_context_camera
+
+        # Get friendly name for display
+        state = self.hass.states.get(entity_id)
+        friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+
+        if user_input is not None:
+            # Handle clear context checkbox
+            clear_context = user_input.get("clear_context", False)
+            context_text = user_input.get("context_text", "").strip()
+
+            # Update contexts dictionary
+            new_contexts = {**camera_contexts}
+            if clear_context or not context_text:
+                # Remove context for this camera
+                new_contexts.pop(entity_id, None)
+            else:
+                # Save new context
+                new_contexts[entity_id] = context_text
+
+            new_options = {**self._entry.options, CONF_CAMERA_CONTEXTS: new_contexts}
+            return self.async_create_entry(title="", data=new_options)
+
+        # Get existing context for this camera
+        existing_context = camera_contexts.get(entity_id, "")
+
+        return self.async_show_form(
+            step_id="camera_context_edit",
+            data_schema=vol.Schema({
+                vol.Optional("context_text", default=existing_context): selector.TextSelector(
+                    selector.TextSelectorConfig(multiline=True)
+                ),
+                vol.Optional("clear_context", default=False): selector.BooleanSelector(),
+            }),
+            description_placeholders={
+                "camera_name": friendly_name,
+                "entity_id": entity_id,
             },
         )
 

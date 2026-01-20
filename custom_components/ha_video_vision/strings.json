@@ -120,9 +120,17 @@
       },
       "camera_context": {
         "title": "Camera Context",
-        "description": "Add context about each camera's view to get more natural responses.\n\nThe AI will use this information to describe scenes naturally, like 'the neighbor is washing their car' instead of 'a person is near a vehicle'.\n\nFormat: camera.entity_id: followed by context lines\n\nExample:\ncamera.front_yard:\n  This camera faces the street\n  The house across the street belongs to the Johnsons\n  Their silver Ford F-150 is usually in their driveway\n  The neighbor to the right is the Smith family",
+        "description": "Select a camera to add or edit its context. Context helps the AI give more natural, personalized descriptions.\n\n{context_count} of {camera_count} cameras have context configured.",
         "data": {
-          "context_config": "Camera Contexts"
+          "selected_camera": "Select Camera"
+        }
+      },
+      "camera_context_edit": {
+        "title": "Edit Context: {camera_name}",
+        "description": "Add context about this camera's view ({entity_id}).\n\nThe AI will use this to describe scenes naturally, like 'the neighbor is washing their car' instead of 'a person is near a vehicle'.\n\nExample context:\nThis camera faces the street\nThe house across the street belongs to the Johnsons\nTheir silver Ford F-150 is usually in their driveway",
+        "data": {
+          "context_text": "Camera Context",
+          "clear_context": "Clear context for this camera"
         }
       },
       "video_quality": {
