@@ -1456,16 +1456,8 @@ class VideoAnalyzer:
             async with aiofiles.open(image_path, 'rb') as f:
                 camera_image = await f.read()
 
-            # Determine provider to set appropriate photo limits
-            # Local vLLM has smaller context windows, so limit photos to avoid token overflow
-            effective_provider, _, _ = self._get_effective_provider()
-            if effective_provider == PROVIDER_LOCAL:
-                max_photos = 1  # Local models have ~24k token limit
-            else:
-                max_photos = 3  # Cloud providers have larger context windows
-
-            # Load reference photos
-            reference_photos = await self._load_reference_photos(max_photos_per_person=max_photos)
+            # Load reference photos (up to 3 per person for all providers)
+            reference_photos = await self._load_reference_photos(max_photos_per_person=3)
             if not reference_photos:
                 _LOGGER.warning("No reference photos found in %s", self.facial_recognition_directory)
                 return {
@@ -1673,42 +1665,25 @@ class VideoAnalyzer:
         system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
         """Identify faces using local vLLM endpoint."""
-        # Local vLLM has limited context (~24k tokens), so we need to:
-        # 1. Limit number of people to 4 max
-        # 2. Resize images to reduce token usage (cap at 512 for local)
-        MAX_PEOPLE = 4
-        MAX_LOCAL_RESOLUTION = 512  # Hard cap for local vLLM to prevent token overflow
-        limited_photos = dict(list(reference_photos.items())[:MAX_PEOPLE])
+        # Use configured resolution (0 = original, no resize) - full quality for local
+        res = self.facial_recognition_resolution
+        quality = 90  # High quality matching cloud providers
 
-        if len(reference_photos) > MAX_PEOPLE:
-            _LOGGER.warning(
-                "Local vLLM: Limiting facial recognition to %d of %d people to avoid token overflow",
-                MAX_PEOPLE, len(reference_photos)
-            )
-
-        # Use configured resolution but cap at 512 for local vLLM
-        configured_res = self.facial_recognition_resolution
-        if configured_res == 0:
-            # User wants original, but we must cap for local
-            local_res = MAX_LOCAL_RESOLUTION
-        else:
-            local_res = min(configured_res, MAX_LOCAL_RESOLUTION)
-
-        # Build content array with resized reference photos and camera image
+        # Build content array with reference photos and camera image
         content = []
 
-        # Add reference photos with labels (resized for token efficiency)
-        for person_name, photos in limited_photos.items():
+        # Add reference photos with labels (optionally resized based on config)
+        for person_name, photos in reference_photos.items():
             content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
             for photo in photos:
-                resized = await asyncio.to_thread(self._resize_reference_image, photo, local_res, 75)
-                photo_b64 = base64.b64encode(resized).decode()
+                processed = await asyncio.to_thread(self._resize_reference_image, photo, res, quality)
+                photo_b64 = base64.b64encode(processed).decode()
                 content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
 
-        # Add the camera image to analyze (also resized)
+        # Add the camera image to analyze
         content.append({"type": "text", "text": "\nNow analyze this camera image and identify any matching people:"})
-        resized_camera = await asyncio.to_thread(self._resize_reference_image, camera_image, local_res, 75)
-        camera_b64 = base64.b64encode(resized_camera).decode()
+        processed_camera = await asyncio.to_thread(self._resize_reference_image, camera_image, res, quality)
+        camera_b64 = base64.b64encode(processed_camera).decode()
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{camera_b64}"}})
 
         payload = {
