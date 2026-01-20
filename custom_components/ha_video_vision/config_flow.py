@@ -896,9 +896,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                     selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
                 ),
             }),
-            description_placeholders={
-                "directory_hint": "Directory containing subfolders per person (e.g., /config/camera_faces/Carlos/)",
-            },
+            description_placeholders={},
         )
 
     async def async_step_timeline(
