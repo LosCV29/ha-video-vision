@@ -47,10 +47,12 @@
           "configure_openrouter": "Configure OpenRouter",
           "configure_local": "Configure Local vLLM",
           "cameras": "Select Cameras",
+          "camera_context": "Camera Context",
           "voice_aliases": "Voice Aliases",
-          "video_quality": "Video Quality",
+          "video_quality": "Video Settings",
           "ai_settings": "AI Settings",
-          "facial_recognition": "Facial Recognition"
+          "facial_recognition": "Facial Recognition",
+          "timeline": "Timeline"
         }
       },
       "default_provider": {
@@ -117,12 +119,14 @@
         }
       },
       "video_quality": {
-        "title": "Video Quality",
+        "title": "Video Settings",
         "description": "Configure recording and snapshot settings",
         "data": {
           "video_duration": "Recording Duration",
           "video_width": "Resolution",
+          "video_fps_percent": "Frame Rate",
           "snapshot_quality": "Snapshot Quality",
+          "notification_frame_position": "Notification Frame Position (0%=start, 50%=middle, 100%=end)",
           "snapshot_dir": "Snapshot Directory"
         }
       },
@@ -136,16 +140,39 @@
       },
       "facial_recognition": {
         "title": "Facial Recognition",
-        "description": "Configure the Facial Recognition add-on. {url_hint}",
+        "description": "LLM-based facial recognition using reference photos. {directory_hint}",
         "data": {
           "facial_recognition_enabled": "Enable Facial Recognition",
-          "facial_recognition_url": "Server URL",
-          "facial_recognition_confidence": "Minimum Confidence"
+          "facial_recognition_directory": "Reference Photos Directory"
+        }
+      },
+      "camera_context": {
+        "title": "Camera Context",
+        "description": "Select a camera to add or edit its context. Context helps the AI give more natural, personalized descriptions.\n\n{context_count} of {camera_count} cameras have context configured.",
+        "data": {
+          "selected_camera": "Select Camera"
+        }
+      },
+      "camera_context_edit": {
+        "title": "Edit Context: {camera_name}",
+        "description": "Add context about this camera's view ({entity_id}).\n\nThe AI will use this to describe scenes naturally, like 'the neighbor is washing their car' instead of 'a person is near a vehicle'.\n\nExample context:\nThis camera faces the street\nThe house across the street belongs to the Johnsons\nTheir silver Ford F-150 is usually in their driveway",
+        "data": {
+          "context_text": "Camera Context",
+          "clear_context": "Clear context for this camera"
+        }
+      },
+      "timeline": {
+        "title": "Timeline",
+        "description": "Store camera analysis events in a calendar for historical tracking. View in the Calendar panel or add a calendar card to your dashboard.",
+        "data": {
+          "timeline_enabled": "Enable Timeline",
+          "timeline_retention_days": "Keep events for"
         }
       }
     },
     "abort": {
-      "no_providers_configured": "No providers configured. Use the provider configuration options first."
+      "no_providers_configured": "No providers configured. Use the provider configuration options first.",
+      "no_cameras_selected": "No cameras selected. Please select cameras first in the 'Select Cameras' option."
     }
   }
 }
