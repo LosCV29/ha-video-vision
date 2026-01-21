@@ -1110,7 +1110,10 @@ class VideoAnalyzer:
 
         # Send to AI provider (face_rec snapshot saves in background)
         # Note: snapshot_path already saved from immediate snapshot above
-        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt, entity_id)
+        # Pass immediate_snapshot to ensure AI sees the exact moment of motion detection
+        description, provider_used = await self._analyze_with_provider(
+            video_bytes, frame_bytes, prompt, entity_id, immediate_snapshot
+        )
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
 
@@ -1217,9 +1220,17 @@ class VideoAnalyzer:
             return None, f"Analysis error: {str(e)}"
 
     async def _analyze_with_provider(
-        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, entity_id: str = ""
+        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
+        entity_id: str = "", immediate_snapshot: bytes | None = None
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
+
+        Args:
+            video_bytes: Recorded video data
+            frame_bytes: Frame extracted from video (fallback)
+            prompt: User/system prompt for analysis
+            entity_id: Camera entity ID for context lookup
+            immediate_snapshot: Snapshot captured at moment of motion (for better detection)
 
         Returns: (description, provider_used)
         """
@@ -1229,11 +1240,15 @@ class VideoAnalyzer:
         _LOGGER.debug("Sending to AI: %s", effective_provider)
 
         if effective_provider == PROVIDER_GOOGLE:
-            result = await self._analyze_google(video_bytes, prompt, effective_model, effective_api_key, system_prompt)
+            result = await self._analyze_google(
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, immediate_snapshot
+            )
         elif effective_provider == PROVIDER_OPENROUTER:
-            result = await self._analyze_openrouter(video_bytes, prompt, effective_model, effective_api_key, system_prompt)
+            result = await self._analyze_openrouter(
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, immediate_snapshot
+            )
         elif effective_provider == PROVIDER_LOCAL:
-            result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt)
+            result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt, immediate_snapshot)
         else:
             result = "Unknown provider configured"
 
@@ -1241,20 +1256,33 @@ class VideoAnalyzer:
 
     async def _analyze_google(
         self, video_bytes: bytes | None, prompt: str,
-        model: str, api_key: str, system_prompt: str
+        model: str, api_key: str, system_prompt: str,
+        immediate_snapshot: bytes | None = None
     ) -> str:
-        """Analyze using Google Gemini - VIDEO ONLY."""
+        """Analyze using Google Gemini - VIDEO with optional instant snapshot for better detection."""
         if not video_bytes:
             return self._NO_VIDEO_ERROR
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         video_b64 = base64.b64encode(video_bytes).decode()
 
+        # Build content parts - include immediate snapshot if available for better person detection
+        parts = [{"inline_data": {"mime_type": "video/mp4", "data": video_b64}}]
+
+        # Add immediate snapshot (captured at exact moment of motion) to improve detection
+        if immediate_snapshot:
+            snapshot_b64 = base64.b64encode(immediate_snapshot).decode()
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": snapshot_b64}})
+            # Update prompt to reference both media
+            prompt = (
+                "I'm providing a video clip AND an instant snapshot image captured at the exact moment of motion detection. "
+                "The snapshot may show something the video missed. Analyze BOTH carefully. " + prompt
+            )
+
+        parts.append({"text": prompt})
+
         payload = {
-            "contents": [{"parts": [
-                {"inline_data": {"mime_type": "video/mp4", "data": video_b64}},
-                {"text": prompt}
-            ]}],
+            "contents": [{"parts": parts}],
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "generationConfig": {
                 "temperature": self.vllm_temperature,
@@ -1291,9 +1319,10 @@ class VideoAnalyzer:
 
     async def _analyze_openrouter(
         self, video_bytes: bytes | None, prompt: str,
-        model: str, api_key: str, system_prompt: str
+        model: str, api_key: str, system_prompt: str,
+        immediate_snapshot: bytes | None = None
     ) -> str:
-        """Analyze using OpenRouter - VIDEO ONLY."""
+        """Analyze using OpenRouter - VIDEO with optional instant snapshot for better detection."""
         if not video_bytes:
             return self._NO_VIDEO_ERROR
 
@@ -1305,14 +1334,30 @@ class VideoAnalyzer:
             )
 
         video_b64 = base64.b64encode(video_bytes).decode()
+
+        # Build content array with video
+        user_content = [
+            {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}}
+        ]
+
+        # Add immediate snapshot for better person detection
+        if immediate_snapshot:
+            snapshot_b64 = base64.b64encode(immediate_snapshot).decode()
+            user_content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{snapshot_b64}"}}
+            )
+            prompt = (
+                "I'm providing a video clip AND an instant snapshot image captured at the exact moment of motion detection. "
+                "The snapshot may show something the video missed. Analyze BOTH carefully. " + prompt
+            )
+
+        user_content.append({"type": "text", "text": prompt})
+
         payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}},
-                    {"type": "text", "text": prompt}
-                ]}
+                {"role": "user", "content": user_content}
             ],
             "max_tokens": self.vllm_max_tokens,
             "temperature": self.vllm_temperature,
@@ -1327,20 +1372,35 @@ class VideoAnalyzer:
 
     async def _analyze_local(
         self, video_bytes: bytes | None, frame_bytes: bytes | None,
-        prompt: str, system_prompt: str
+        prompt: str, system_prompt: str,
+        immediate_snapshot: bytes | None = None
     ) -> str:
-        """Analyze using local vLLM endpoint - VIDEO preferred, image fallback."""
-        if not video_bytes and not frame_bytes:
+        """Analyze using local vLLM endpoint - VIDEO preferred, with instant snapshot for better detection."""
+        if not video_bytes and not frame_bytes and not immediate_snapshot:
             return "No video or image available for analysis"
 
         # Build content with video or image fallback
         content = []
+        has_video = False
         if video_bytes:
             video_b64 = base64.b64encode(video_bytes).decode()
             content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
-        elif frame_bytes:
+            has_video = True
+
+        # Add immediate snapshot for better person detection (captured at exact moment of motion)
+        if immediate_snapshot:
+            snapshot_b64 = base64.b64encode(immediate_snapshot).decode()
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{snapshot_b64}"}})
+            if has_video:
+                prompt = (
+                    "I'm providing a video clip AND an instant snapshot image captured at the exact moment of motion detection. "
+                    "The snapshot may show something the video missed. Analyze BOTH carefully. " + prompt
+                )
+        elif frame_bytes and not has_video:
+            # Only use frame_bytes as fallback if no video and no immediate snapshot
             image_b64 = base64.b64encode(frame_bytes).decode()
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
+
         content.append({"type": "text", "text": prompt})
 
         payload = {
