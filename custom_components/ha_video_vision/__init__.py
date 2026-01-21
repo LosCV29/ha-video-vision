@@ -1704,7 +1704,7 @@ class VideoAnalyzer:
             return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
 
         response_text = self._extract_openai_response(result, "Local vLLM")
-        return self._parse_face_recognition_response(response_text, list(limited_photos.keys()))
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
 
     def _parse_face_recognition_response(
         self, response_text: str, known_people: list[str]
