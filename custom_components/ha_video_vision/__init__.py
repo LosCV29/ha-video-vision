@@ -679,7 +679,9 @@ class VideoAnalyzer:
         try:
             stream_url = await async_get_stream_source(self.hass, entity_id)
             if stream_url:
-                _LOGGER.debug("Got stream URL for %s via async_get_stream_source", entity_id)
+                # Mask credentials for logging
+                masked_url = re.sub(r'://[^:]+:[^@]+@', '://****:****@', stream_url)
+                _LOGGER.debug("Got stream URL for %s via async_get_stream_source: %s", entity_id, masked_url)
                 return stream_url
         except Exception as e:
             _LOGGER.debug("async_get_stream_source failed for %s: %s", entity_id, e)
@@ -943,6 +945,11 @@ class VideoAnalyzer:
 
             # Build and execute ffmpeg recording command
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
+
+            # Log the FFmpeg command (mask credentials in URL)
+            masked_cmd = [re.sub(r'://[^:]+:[^@]+@', '://****:****@', str(c)) for c in video_cmd]
+            _LOGGER.debug("FFmpeg command for %s: %s", entity_id, ' '.join(masked_cmd))
+
             video_proc = await asyncio.create_subprocess_exec(
                 *video_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -953,9 +960,10 @@ class VideoAnalyzer:
 
             if video_proc.returncode != 0:
                 stderr_text = stderr.decode() if stderr else "No error output"
-                _LOGGER.error("FFmpeg failed (code %d) for %s: %s",
-                            video_proc.returncode, entity_id, stderr_text[:500])
-                raise RuntimeError(f"FFmpeg failed: {stderr_text[:200]}")
+                # Log more of stderr to capture actual error (not just FFmpeg banner)
+                _LOGGER.error("FFmpeg failed (code %d) for %s. Full stderr:\n%s",
+                            video_proc.returncode, entity_id, stderr_text[-2000:])
+                raise RuntimeError(f"FFmpeg failed: {stderr_text[-500:]}")
 
             # Read video and extract frames
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
