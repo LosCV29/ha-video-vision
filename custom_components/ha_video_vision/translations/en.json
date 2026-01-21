@@ -127,7 +127,6 @@
           "video_fps_percent": "Frame Rate",
           "snapshot_quality": "Snapshot Quality",
           "notification_frame_position": "Notification Frame Position (0%=start, 50%=middle, 100%=end)",
-          "ai_snapshot_position": "AI Snapshot Position (0%=start captures trigger moment)",
           "snapshot_dir": "Snapshot Directory"
         }
       },

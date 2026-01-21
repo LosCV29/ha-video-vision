@@ -81,7 +81,6 @@ CONF_VIDEO_DURATION: Final = "video_duration"
 CONF_VIDEO_WIDTH: Final = "video_width"
 CONF_VIDEO_FPS_PERCENT: Final = "video_fps_percent"
 CONF_NOTIFICATION_FRAME_POSITION: Final = "notification_frame_position"
-CONF_AI_SNAPSHOT_POSITION: Final = "ai_snapshot_position"
 
 DEFAULT_VIDEO_DURATION: Final = 3
 DEFAULT_VIDEO_WIDTH: Final = 1280  # Match LLM Vision default for better detection
@@ -89,10 +88,6 @@ DEFAULT_VIDEO_FPS_PERCENT: Final = 100  # 100% of camera's native FPS
 # Frame position for notification image (percentage of video duration)
 # 0 = first frame, 50 = middle, 100 = last frame
 DEFAULT_NOTIFICATION_FRAME_POSITION: Final = 50
-# Frame position for AI analysis snapshot (percentage of video duration)
-# 0 = first frame (captures motion trigger moment), 50 = middle, 100 = last frame
-# This snapshot is sent to AI alongside the video for improved detection
-DEFAULT_AI_SNAPSHOT_POSITION: Final = 0
 
 # =============================================================================
 # SNAPSHOT SETTINGS
