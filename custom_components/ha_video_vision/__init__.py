@@ -1012,8 +1012,7 @@ class VideoAnalyzer:
 
         except Exception as e:
             _LOGGER.error("Error recording video from %s: %s", entity_id, e)
-            fallback_frame = await self._get_camera_snapshot(entity_id)
-            return None, fallback_frame, None
+            raise  # No image fallback - video or nothing
         finally:
             for path in [video_path, frame_path, face_rec_frame_path]:
                 if path and os.path.exists(path):
@@ -1359,18 +1358,14 @@ class VideoAnalyzer:
         self, video_bytes: bytes | None, frame_bytes: bytes | None,
         prompt: str, system_prompt: str
     ) -> str:
-        """Analyze using local vLLM endpoint - VIDEO preferred, image fallback."""
-        if not video_bytes and not frame_bytes:
-            return "No video or image available for analysis"
+        """Analyze using local vLLM endpoint - VIDEO only, no image fallback."""
+        if not video_bytes:
+            return "No video available for analysis - image fallback disabled"
 
-        # Build content with video or image fallback
+        # Build content with video only
         content = []
-        if video_bytes:
-            video_b64 = base64.b64encode(video_bytes).decode()
-            content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
-        elif frame_bytes:
-            image_b64 = base64.b64encode(frame_bytes).decode()
-            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
+        video_b64 = base64.b64encode(video_bytes).decode()
+        content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
         content.append({"type": "text", "text": prompt})
 
         payload = {
