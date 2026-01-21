@@ -1097,6 +1097,8 @@ class VideoAnalyzer:
                 "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
                 "Report ANY people, animals, or pets visible - even if small, distant, partially obscured, or at the edges. "
                 "Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. "
+                "IMPORTANT: When multiple vehicles are present, distinguish them by COLOR first (e.g., 'blue SUV' vs 'silver SUV'). "
+                "Be precise about which specific vehicle a person is interacting with - identify it by its color and position in frame. "
                 "For animals, identify the type (dog, cat, etc.) and what they are doing. "
                 "Be concise (2-3 sentences)."
             )
@@ -1161,7 +1163,9 @@ class VideoAnalyzer:
                 "someone matching a described neighbor near their described vehicle, you can say "
                 "'the neighbor is by their truck' instead of 'a person is near a vehicle'. "
                 "Be accurate - only use context when it clearly matches what you observe. "
-                "If unsure, describe what you see without assuming identities."
+                "If unsure, describe what you see without assuming identities. "
+                "IMPORTANT: Be PRECISE about which vehicle a person is interacting with - "
+                "always identify vehicles by their distinct COLOR to avoid confusion."
             )
         else:
             # Default prompt - modeled after LLM Vision's effective approach
@@ -1170,7 +1174,10 @@ class VideoAnalyzer:
                 "Focus on people, pets, and vehicles - scan the ENTIRE frame including background, "
                 "edges, and distant areas. Report ANY people visible no matter how small. "
                 "Track movement and activity. Describe physical characteristics only - "
-                "never assume identities. Be accurate and factual."
+                "never assume identities. Be accurate and factual. "
+                "When describing positions, be PRECISE about spatial relationships - "
+                "identify objects by their COLOR and position in frame (left/right/center). "
+                "If someone is near a vehicle, clearly identify WHICH vehicle by its distinct color."
             )
 
     # Shared error message for cloud cameras without video streams
