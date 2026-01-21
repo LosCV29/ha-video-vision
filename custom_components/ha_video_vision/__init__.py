@@ -773,12 +773,12 @@ class VideoAnalyzer:
         cmd = ["ffmpeg", "-y"]
 
         # LOW LATENCY FLAGS - minimize time before recording starts
-        # These reduce the ~1-2 second delay FFmpeg normally takes to probe the stream
+        # Balance between fast startup and reliable stream detection
         cmd.extend([
             "-fflags", "nobuffer",          # Don't buffer input - start immediately
             "-flags", "low_delay",          # Low latency decoding mode
-            "-probesize", "32",             # Minimal probe size (bytes) - faster stream detection
-            "-analyzeduration", "0",        # Skip duration analysis - start recording NOW
+            "-probesize", "32768",          # 32KB probe size - enough to detect stream format
+            "-analyzeduration", "1000000",  # 1 second analysis - allows codec detection
         ])
 
         if stream_url.startswith("rtsp://"):
