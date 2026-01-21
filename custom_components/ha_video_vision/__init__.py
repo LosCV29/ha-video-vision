@@ -232,6 +232,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services
     async def handle_analyze_camera(call: ServiceCall) -> dict[str, Any]:
         """Handle analyze_camera service call."""
+        # Get current config (may have been updated via options flow)
+        current_config = hass.data[DOMAIN][entry.entry_id]["config"]
+
         camera = call.data[ATTR_CAMERA]
         duration = call.data.get(ATTR_DURATION, 3)
         user_query = call.data.get(ATTR_USER_QUERY, "")
@@ -248,7 +251,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Run LLM-based facial recognition if enabled
         face_rec_path = result.get("face_rec_snapshot_path") or result.get("snapshot_path")
-        facial_rec_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
+        facial_rec_enabled = current_config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
         if do_facial_recognition and facial_rec_enabled and result.get("success") and face_rec_path:
             face_result = await analyzer.identify_faces(face_rec_path)
             result["face_recognition"] = face_result
