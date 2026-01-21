@@ -58,10 +58,12 @@ from .const import (
     CONF_VIDEO_WIDTH,
     CONF_VIDEO_FPS_PERCENT,
     CONF_NOTIFICATION_FRAME_POSITION,
+    CONF_AI_SNAPSHOT_POSITION,
     DEFAULT_VIDEO_DURATION,
     DEFAULT_VIDEO_WIDTH,
     DEFAULT_VIDEO_FPS_PERCENT,
     DEFAULT_NOTIFICATION_FRAME_POSITION,
+    DEFAULT_AI_SNAPSHOT_POSITION,
     # Snapshot
     CONF_SNAPSHOT_DIR,
     CONF_SNAPSHOT_QUALITY,
@@ -408,6 +410,10 @@ class VideoAnalyzer:
         # Frame position for notification image (0=first, 50=middle, 100=last)
         self.notification_frame_position = config.get(
             CONF_NOTIFICATION_FRAME_POSITION, DEFAULT_NOTIFICATION_FRAME_POSITION
+        )
+        # Frame position for AI analysis snapshot (0=first frame captures motion trigger moment)
+        self.ai_snapshot_position = config.get(
+            CONF_AI_SNAPSHOT_POSITION, DEFAULT_AI_SNAPSHOT_POSITION
         )
 
         # Snapshot settings (ensure int type for quality calculations)
@@ -893,8 +899,9 @@ class VideoAnalyzer:
 
     async def _record_video_and_extract_frames(
         self, entity_id: str, duration: int, frame_position: int | None = None,
-        facial_recognition_frame_position: int | None = None, stream_url: str | None = None
-    ) -> tuple[bytes | None, bytes | None, bytes | None]:
+        facial_recognition_frame_position: int | None = None, stream_url: str | None = None,
+        ai_snapshot_position: int | None = None
+    ) -> tuple[bytes | None, bytes | None, bytes | None, bytes | None]:
         """Record video and extract frames. Unified method for all video capture.
 
         Args:
@@ -903,9 +910,11 @@ class VideoAnalyzer:
             frame_position: Position in video for notification frame (0-100%)
             facial_recognition_frame_position: Separate position for face rec frame
             stream_url: Pre-fetched stream URL (if None, will be fetched)
+            ai_snapshot_position: Position for AI analysis snapshot (0-100%). Default 0 (first frame).
 
         Returns:
-            Tuple of (video_bytes, frame_bytes, face_rec_frame_bytes)
+            Tuple of (video_bytes, frame_bytes, face_rec_frame_bytes, ai_snapshot_bytes)
+            - ai_snapshot_bytes: Frame for AI analysis (synchronized with video)
         """
         # Fetch stream URL if not provided
         if stream_url is None:
@@ -914,10 +923,13 @@ class VideoAnalyzer:
         video_bytes = None
         frame_bytes = None
         face_rec_frame_bytes = None
+        ai_snapshot_bytes = None
 
-        # Use configured default if not specified
+        # Use configured defaults if not specified
         if frame_position is None:
             frame_position = self.notification_frame_position
+        if ai_snapshot_position is None:
+            ai_snapshot_position = self.ai_snapshot_position
 
         if not stream_url:
             # No stream URL (cloud camera like Ring/Nest) - use snapshot only
@@ -929,17 +941,21 @@ class VideoAnalyzer:
             frame_bytes = await self._get_camera_snapshot(
                 entity_id, retries=3, delay=1.0, is_cloud_camera=True
             )
-            return video_bytes, frame_bytes, None
+            # For cloud cameras, the snapshot serves as both notification frame and first frame
+            return video_bytes, frame_bytes, None, frame_bytes
 
         video_path = None
         frame_path = None
         face_rec_frame_path = None
+        ai_snapshot_path = None
 
         try:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as vf:
                 video_path = vf.name
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as asf:
+                ai_snapshot_path = asf.name
 
             # Build and execute ffmpeg recording command
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
@@ -962,7 +978,22 @@ class VideoAnalyzer:
                 async with aiofiles.open(video_path, 'rb') as f:
                     video_bytes = await f.read()
 
-                # Extract frames in parallel for speed
+                # Extract frames in parallel for speed:
+                # 1. AI snapshot (ai_snapshot_position%) - for AI analysis, synchronized with video
+                # 2. Notification frame (frame_position%) - for display
+                # 3. Optional face rec frame (if different position)
+
+                # AI snapshot at configurable position (default: 0% = first frame)
+                ai_snapshot_time = duration * (ai_snapshot_position / 100)
+                ai_snapshot_cmd = [
+                    "ffmpeg", "-y", "-ss", str(ai_snapshot_time), "-i", video_path,
+                    "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", ai_snapshot_path
+                ]
+                ai_snapshot_proc = await asyncio.create_subprocess_exec(
+                    *ai_snapshot_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+
+                # Notification frame at configured position
                 frame_time = duration * (frame_position / 100)
                 frame_cmd = [
                     "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
@@ -987,12 +1018,16 @@ class VideoAnalyzer:
                         *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                     )
 
-                # Wait for both extractions
+                # Wait for all extractions in parallel
+                await asyncio.wait_for(ai_snapshot_proc.wait(), timeout=10)
                 await asyncio.wait_for(frame_proc.wait(), timeout=10)
                 if face_rec_proc:
                     await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
 
                 # Read extracted frames
+                if os.path.exists(ai_snapshot_path) and os.path.getsize(ai_snapshot_path) > 0:
+                    async with aiofiles.open(ai_snapshot_path, 'rb') as f:
+                        ai_snapshot_bytes = await f.read()
                 if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
                     async with aiofiles.open(frame_path, 'rb') as f:
                         frame_bytes = await f.read()
@@ -1000,14 +1035,15 @@ class VideoAnalyzer:
                     async with aiofiles.open(face_rec_frame_path, 'rb') as f:
                         face_rec_frame_bytes = await f.read()
 
-            return video_bytes, frame_bytes, face_rec_frame_bytes
+            return video_bytes, frame_bytes, face_rec_frame_bytes, ai_snapshot_bytes
 
         except Exception as e:
             _LOGGER.error("Error recording video from %s: %s", entity_id, e)
             fallback_frame = await self._get_camera_snapshot(entity_id)
-            return None, fallback_frame, None
+            # Fallback frame serves as both notification and AI snapshot
+            return None, fallback_frame, None, fallback_frame
         finally:
-            for path in [video_path, frame_path, face_rec_frame_path]:
+            for path in [video_path, frame_path, face_rec_frame_path, ai_snapshot_path]:
                 if path and os.path.exists(path):
                     try:
                         os.remove(path)
@@ -1079,14 +1115,14 @@ class VideoAnalyzer:
         immediate_snapshot = await snapshot_task
 
         # Wait for video recording to complete
-        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
+        video_bytes, video_frame_bytes, face_rec_frame_bytes, ai_snapshot_bytes = await video_task
 
-        # Save the immediate snapshot for notification
+        # Save the immediate snapshot for notification (faster than waiting for video frames)
         snapshot_path = None
         if immediate_snapshot:
             snapshot_path = await self._save_snapshot_async(immediate_snapshot, safe_name)
 
-        # Use immediate snapshot for notification display
+        # Use immediate snapshot for notification display (for speed)
         frame_bytes = immediate_snapshot or video_frame_bytes
 
         # Prepare prompt
@@ -1108,9 +1144,11 @@ class VideoAnalyzer:
                 self._save_snapshot_async(face_rec_frame_bytes, f"{safe_name}_face_rec")
             )
 
-        # Send to AI provider (face_rec snapshot saves in background)
-        # Note: snapshot_path already saved from immediate snapshot above
-        description, provider_used = await self._analyze_with_provider(video_bytes, frame_bytes, prompt, entity_id)
+        # Send to AI provider with AI snapshot for better detection
+        # AI snapshot is synchronized with video (extracted from same source at configured position)
+        description, provider_used = await self._analyze_with_provider(
+            video_bytes, frame_bytes, prompt, entity_id, ai_snapshot_bytes
+        )
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
 
@@ -1217,9 +1255,17 @@ class VideoAnalyzer:
             return None, f"Analysis error: {str(e)}"
 
     async def _analyze_with_provider(
-        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str, entity_id: str = ""
+        self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
+        entity_id: str = "", ai_snapshot_bytes: bytes | None = None
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
+
+        Args:
+            video_bytes: Video data to analyze
+            frame_bytes: Fallback frame for providers that don't support video
+            prompt: Analysis prompt
+            entity_id: Camera entity ID for context
+            ai_snapshot_bytes: Snapshot extracted from video for improved detection
 
         Returns: (description, provider_used)
         """
@@ -1229,11 +1275,17 @@ class VideoAnalyzer:
         _LOGGER.debug("Sending to AI: %s", effective_provider)
 
         if effective_provider == PROVIDER_GOOGLE:
-            result = await self._analyze_google(video_bytes, prompt, effective_model, effective_api_key, system_prompt)
+            result = await self._analyze_google(
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, ai_snapshot_bytes
+            )
         elif effective_provider == PROVIDER_OPENROUTER:
-            result = await self._analyze_openrouter(video_bytes, prompt, effective_model, effective_api_key, system_prompt)
+            result = await self._analyze_openrouter(
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, ai_snapshot_bytes
+            )
         elif effective_provider == PROVIDER_LOCAL:
-            result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt)
+            result = await self._analyze_local(
+                video_bytes, frame_bytes, prompt, system_prompt, ai_snapshot_bytes
+            )
         else:
             result = "Unknown provider configured"
 
@@ -1241,20 +1293,30 @@ class VideoAnalyzer:
 
     async def _analyze_google(
         self, video_bytes: bytes | None, prompt: str,
-        model: str, api_key: str, system_prompt: str
+        model: str, api_key: str, system_prompt: str,
+        ai_snapshot_bytes: bytes | None = None
     ) -> str:
-        """Analyze using Google Gemini - VIDEO ONLY."""
+        """Analyze using Google Gemini - VIDEO with optional AI snapshot for better detection."""
         if not video_bytes:
             return self._NO_VIDEO_ERROR
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         video_b64 = base64.b64encode(video_bytes).decode()
 
+        # Build parts list: video first, then optional snapshot, then prompt
+        parts = [
+            {"inline_data": {"mime_type": "video/mp4", "data": video_b64}},
+        ]
+
+        # Add AI snapshot if available for improved detection
+        if ai_snapshot_bytes:
+            snapshot_b64 = base64.b64encode(ai_snapshot_bytes).decode()
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": snapshot_b64}})
+
+        parts.append({"text": prompt})
+
         payload = {
-            "contents": [{"parts": [
-                {"inline_data": {"mime_type": "video/mp4", "data": video_b64}},
-                {"text": prompt}
-            ]}],
+            "contents": [{"parts": parts}],
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "generationConfig": {
                 "temperature": self.vllm_temperature,
@@ -1291,9 +1353,10 @@ class VideoAnalyzer:
 
     async def _analyze_openrouter(
         self, video_bytes: bytes | None, prompt: str,
-        model: str, api_key: str, system_prompt: str
+        model: str, api_key: str, system_prompt: str,
+        ai_snapshot_bytes: bytes | None = None
     ) -> str:
-        """Analyze using OpenRouter - VIDEO ONLY."""
+        """Analyze using OpenRouter - VIDEO with optional AI snapshot for better detection."""
         if not video_bytes:
             return self._NO_VIDEO_ERROR
 
@@ -1305,14 +1368,24 @@ class VideoAnalyzer:
             )
 
         video_b64 = base64.b64encode(video_bytes).decode()
+
+        # Build content list: video first, then optional snapshot, then prompt
+        content = [
+            {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}},
+        ]
+
+        # Add AI snapshot if available for improved detection
+        if ai_snapshot_bytes:
+            snapshot_b64 = base64.b64encode(ai_snapshot_bytes).decode()
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{snapshot_b64}"}})
+
+        content.append({"type": "text", "text": prompt})
+
         payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}},
-                    {"type": "text", "text": prompt}
-                ]}
+                {"role": "user", "content": content}
             ],
             "max_tokens": self.vllm_max_tokens,
             "temperature": self.vllm_temperature,
@@ -1327,20 +1400,27 @@ class VideoAnalyzer:
 
     async def _analyze_local(
         self, video_bytes: bytes | None, frame_bytes: bytes | None,
-        prompt: str, system_prompt: str
+        prompt: str, system_prompt: str,
+        ai_snapshot_bytes: bytes | None = None
     ) -> str:
-        """Analyze using local vLLM endpoint - VIDEO preferred, image fallback."""
+        """Analyze using local vLLM endpoint - VIDEO with optional AI snapshot for better detection."""
         if not video_bytes and not frame_bytes:
             return "No video or image available for analysis"
 
-        # Build content with video or image fallback
+        # Build content: video first (or fallback to frame), then optional snapshot, then prompt
         content = []
         if video_bytes:
             video_b64 = base64.b64encode(video_bytes).decode()
             content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
+
+            # Add AI snapshot if available for improved detection
+            if ai_snapshot_bytes:
+                snapshot_b64 = base64.b64encode(ai_snapshot_bytes).decode()
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{snapshot_b64}"}})
         elif frame_bytes:
             image_b64 = base64.b64encode(frame_bytes).decode()
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
+
         content.append({"type": "text", "text": prompt})
 
         payload = {
