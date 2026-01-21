@@ -894,7 +894,7 @@ class VideoAnalyzer:
     async def _record_video_and_extract_frames(
         self, entity_id: str, duration: int, frame_position: int | None = None,
         facial_recognition_frame_position: int | None = None, stream_url: str | None = None
-    ) -> tuple[bytes | None, bytes | None, bytes | None]:
+    ) -> tuple[bytes | None, bytes | None, bytes | None, bytes | None]:
         """Record video and extract frames. Unified method for all video capture.
 
         Args:
@@ -905,7 +905,9 @@ class VideoAnalyzer:
             stream_url: Pre-fetched stream URL (if None, will be fetched)
 
         Returns:
-            Tuple of (video_bytes, frame_bytes, face_rec_frame_bytes)
+            Tuple of (video_bytes, frame_bytes, face_rec_frame_bytes, first_frame_bytes)
+            - first_frame_bytes: Frame at 0% (first frame) for AI analysis - captures
+              the exact moment recording started for better person detection
         """
         # Fetch stream URL if not provided
         if stream_url is None:
@@ -914,6 +916,7 @@ class VideoAnalyzer:
         video_bytes = None
         frame_bytes = None
         face_rec_frame_bytes = None
+        first_frame_bytes = None
 
         # Use configured default if not specified
         if frame_position is None:
@@ -929,17 +932,21 @@ class VideoAnalyzer:
             frame_bytes = await self._get_camera_snapshot(
                 entity_id, retries=3, delay=1.0, is_cloud_camera=True
             )
-            return video_bytes, frame_bytes, None
+            # For cloud cameras, the snapshot serves as both notification and first frame
+            return video_bytes, frame_bytes, None, frame_bytes
 
         video_path = None
         frame_path = None
         face_rec_frame_path = None
+        first_frame_path = None
 
         try:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as vf:
                 video_path = vf.name
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as fff:
+                first_frame_path = fff.name
 
             # Build and execute ffmpeg recording command
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
@@ -963,6 +970,7 @@ class VideoAnalyzer:
                     video_bytes = await f.read()
 
                 # Extract frames in parallel for speed
+                # 1. Notification frame at configured position
                 frame_time = duration * (frame_position / 100)
                 frame_cmd = [
                     "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
@@ -972,7 +980,16 @@ class VideoAnalyzer:
                     *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
 
-                # Start face rec frame extraction in parallel if different position
+                # 2. First frame (0%) for AI analysis - captures exact moment of motion
+                first_frame_cmd = [
+                    "ffmpeg", "-y", "-ss", "0", "-i", video_path,
+                    "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", first_frame_path
+                ]
+                first_frame_proc = await asyncio.create_subprocess_exec(
+                    *first_frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+
+                # 3. Face rec frame extraction in parallel if different position
                 face_rec_proc = None
                 if (facial_recognition_frame_position is not None and
                     facial_recognition_frame_position != frame_position):
@@ -987,8 +1004,9 @@ class VideoAnalyzer:
                         *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                     )
 
-                # Wait for both extractions
+                # Wait for all extractions in parallel
                 await asyncio.wait_for(frame_proc.wait(), timeout=10)
+                await asyncio.wait_for(first_frame_proc.wait(), timeout=10)
                 if face_rec_proc:
                     await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
 
@@ -996,18 +1014,22 @@ class VideoAnalyzer:
                 if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
                     async with aiofiles.open(frame_path, 'rb') as f:
                         frame_bytes = await f.read()
+                if os.path.exists(first_frame_path) and os.path.getsize(first_frame_path) > 0:
+                    async with aiofiles.open(first_frame_path, 'rb') as f:
+                        first_frame_bytes = await f.read()
                 if face_rec_frame_path and os.path.exists(face_rec_frame_path) and os.path.getsize(face_rec_frame_path) > 0:
                     async with aiofiles.open(face_rec_frame_path, 'rb') as f:
                         face_rec_frame_bytes = await f.read()
 
-            return video_bytes, frame_bytes, face_rec_frame_bytes
+            return video_bytes, frame_bytes, face_rec_frame_bytes, first_frame_bytes
 
         except Exception as e:
             _LOGGER.error("Error recording video from %s: %s", entity_id, e)
             fallback_frame = await self._get_camera_snapshot(entity_id)
-            return None, fallback_frame, None
+            # Fallback frame serves as both notification and first frame
+            return None, fallback_frame, None, fallback_frame
         finally:
-            for path in [video_path, frame_path, face_rec_frame_path]:
+            for path in [video_path, frame_path, face_rec_frame_path, first_frame_path]:
                 if path and os.path.exists(path):
                     try:
                         os.remove(path)
@@ -1079,14 +1101,14 @@ class VideoAnalyzer:
         immediate_snapshot = await snapshot_task
 
         # Wait for video recording to complete
-        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
+        video_bytes, video_frame_bytes, face_rec_frame_bytes, first_frame_bytes = await video_task
 
-        # Save the immediate snapshot for notification
+        # Save the immediate snapshot for notification (faster than waiting for video)
         snapshot_path = None
         if immediate_snapshot:
             snapshot_path = await self._save_snapshot_async(immediate_snapshot, safe_name)
 
-        # Use immediate snapshot for notification display
+        # Use immediate snapshot for notification display (for speed)
         frame_bytes = immediate_snapshot or video_frame_bytes
 
         # Prepare prompt
@@ -1110,9 +1132,9 @@ class VideoAnalyzer:
 
         # Send to AI provider (face_rec snapshot saves in background)
         # Note: snapshot_path already saved from immediate snapshot above
-        # Pass immediate_snapshot to ensure AI sees the exact moment of motion detection
+        # Pass first_frame_bytes (from video) for better person detection - it's synchronized with the video
         description, provider_used = await self._analyze_with_provider(
-            video_bytes, frame_bytes, prompt, entity_id, immediate_snapshot
+            video_bytes, frame_bytes, prompt, entity_id, first_frame_bytes
         )
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
@@ -1221,16 +1243,17 @@ class VideoAnalyzer:
 
     async def _analyze_with_provider(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        entity_id: str = "", immediate_snapshot: bytes | None = None
+        entity_id: str = "", first_frame_bytes: bytes | None = None
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
 
         Args:
             video_bytes: Recorded video data
-            frame_bytes: Frame extracted from video (fallback)
+            frame_bytes: Frame for fallback (notification frame)
             prompt: User/system prompt for analysis
             entity_id: Camera entity ID for context lookup
-            immediate_snapshot: Snapshot captured at moment of motion (for better detection)
+            first_frame_bytes: First frame (0%) extracted from video - synchronized with
+                video for better person detection at the moment recording started
 
         Returns: (description, provider_used)
         """
@@ -1241,14 +1264,14 @@ class VideoAnalyzer:
 
         if effective_provider == PROVIDER_GOOGLE:
             result = await self._analyze_google(
-                video_bytes, prompt, effective_model, effective_api_key, system_prompt, immediate_snapshot
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, first_frame_bytes
             )
         elif effective_provider == PROVIDER_OPENROUTER:
             result = await self._analyze_openrouter(
-                video_bytes, prompt, effective_model, effective_api_key, system_prompt, immediate_snapshot
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, first_frame_bytes
             )
         elif effective_provider == PROVIDER_LOCAL:
-            result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt, immediate_snapshot)
+            result = await self._analyze_local(video_bytes, frame_bytes, prompt, system_prompt, first_frame_bytes)
         else:
             result = "Unknown provider configured"
 
@@ -1257,26 +1280,27 @@ class VideoAnalyzer:
     async def _analyze_google(
         self, video_bytes: bytes | None, prompt: str,
         model: str, api_key: str, system_prompt: str,
-        immediate_snapshot: bytes | None = None
+        first_frame_bytes: bytes | None = None
     ) -> str:
-        """Analyze using Google Gemini - VIDEO with optional instant snapshot for better detection."""
+        """Analyze using Google Gemini - VIDEO with first frame for better detection."""
         if not video_bytes:
             return self._NO_VIDEO_ERROR
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         video_b64 = base64.b64encode(video_bytes).decode()
 
-        # Build content parts - include immediate snapshot if available for better person detection
+        # Build content parts - include first frame if available for better person detection
         parts = [{"inline_data": {"mime_type": "video/mp4", "data": video_b64}}]
 
-        # Add immediate snapshot (captured at exact moment of motion) to improve detection
-        if immediate_snapshot:
-            snapshot_b64 = base64.b64encode(immediate_snapshot).decode()
-            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": snapshot_b64}})
+        # Add first frame (0% of video) - synchronized with video, captures exact start moment
+        if first_frame_bytes:
+            first_frame_b64 = base64.b64encode(first_frame_bytes).decode()
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": first_frame_b64}})
             # Update prompt to reference both media
             prompt = (
-                "I'm providing a video clip AND an instant snapshot image captured at the exact moment of motion detection. "
-                "The snapshot may show something the video missed. Analyze BOTH carefully. " + prompt
+                "I'm providing a video clip AND its first frame as a still image. "
+                "The first frame captures the exact moment recording started and may show people/objects "
+                "more clearly. Analyze BOTH the video AND the first frame image carefully. " + prompt
             )
 
         parts.append({"text": prompt})
@@ -1320,9 +1344,9 @@ class VideoAnalyzer:
     async def _analyze_openrouter(
         self, video_bytes: bytes | None, prompt: str,
         model: str, api_key: str, system_prompt: str,
-        immediate_snapshot: bytes | None = None
+        first_frame_bytes: bytes | None = None
     ) -> str:
-        """Analyze using OpenRouter - VIDEO with optional instant snapshot for better detection."""
+        """Analyze using OpenRouter - VIDEO with first frame for better detection."""
         if not video_bytes:
             return self._NO_VIDEO_ERROR
 
@@ -1340,15 +1364,16 @@ class VideoAnalyzer:
             {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}}
         ]
 
-        # Add immediate snapshot for better person detection
-        if immediate_snapshot:
-            snapshot_b64 = base64.b64encode(immediate_snapshot).decode()
+        # Add first frame (0% of video) - synchronized with video, captures exact start moment
+        if first_frame_bytes:
+            first_frame_b64 = base64.b64encode(first_frame_bytes).decode()
             user_content.append(
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{snapshot_b64}"}}
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{first_frame_b64}"}}
             )
             prompt = (
-                "I'm providing a video clip AND an instant snapshot image captured at the exact moment of motion detection. "
-                "The snapshot may show something the video missed. Analyze BOTH carefully. " + prompt
+                "I'm providing a video clip AND its first frame as a still image. "
+                "The first frame captures the exact moment recording started and may show people/objects "
+                "more clearly. Analyze BOTH the video AND the first frame image carefully. " + prompt
             )
 
         user_content.append({"type": "text", "text": prompt})
@@ -1373,10 +1398,10 @@ class VideoAnalyzer:
     async def _analyze_local(
         self, video_bytes: bytes | None, frame_bytes: bytes | None,
         prompt: str, system_prompt: str,
-        immediate_snapshot: bytes | None = None
+        first_frame_bytes: bytes | None = None
     ) -> str:
-        """Analyze using local vLLM endpoint - VIDEO preferred, with instant snapshot for better detection."""
-        if not video_bytes and not frame_bytes and not immediate_snapshot:
+        """Analyze using local vLLM endpoint - VIDEO with first frame for better detection."""
+        if not video_bytes and not frame_bytes and not first_frame_bytes:
             return "No video or image available for analysis"
 
         # Build content with video or image fallback
@@ -1387,17 +1412,18 @@ class VideoAnalyzer:
             content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
             has_video = True
 
-        # Add immediate snapshot for better person detection (captured at exact moment of motion)
-        if immediate_snapshot:
-            snapshot_b64 = base64.b64encode(immediate_snapshot).decode()
-            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{snapshot_b64}"}})
+        # Add first frame (0% of video) - synchronized with video, captures exact start moment
+        if first_frame_bytes:
+            first_frame_b64 = base64.b64encode(first_frame_bytes).decode()
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{first_frame_b64}"}})
             if has_video:
                 prompt = (
-                    "I'm providing a video clip AND an instant snapshot image captured at the exact moment of motion detection. "
-                    "The snapshot may show something the video missed. Analyze BOTH carefully. " + prompt
+                    "I'm providing a video clip AND its first frame as a still image. "
+                    "The first frame captures the exact moment recording started and may show people/objects "
+                    "more clearly. Analyze BOTH the video AND the first frame image carefully. " + prompt
                 )
         elif frame_bytes and not has_video:
-            # Only use frame_bytes as fallback if no video and no immediate snapshot
+            # Only use frame_bytes as fallback if no video and no first frame
             image_b64 = base64.b64encode(frame_bytes).decode()
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
 
