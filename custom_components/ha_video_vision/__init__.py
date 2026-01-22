@@ -801,10 +801,9 @@ class VideoAnalyzer:
         ])
 
         if stream_url.startswith("rtsp://"):
-            cmd.extend([
-                "-rtsp_transport", "tcp",
-                "-rtsp_flags", "prefer_tcp",                # Prefer TCP for reliability
-            ])
+            # Use UDP for faster connection (no TCP handshake overhead)
+            # Reolink and similar local cameras work better with UDP
+            cmd.extend(["-rtsp_transport", "udp"])
 
         cmd.extend(["-i", stream_url, "-t", str(duration)])
 
@@ -970,13 +969,15 @@ class VideoAnalyzer:
             _LOGGER.debug("FFmpeg command for %s: %s", entity_id, ' '.join(masked_cmd))
 
             # Retry logic for unstable doorbell streams that may be busy on motion trigger
-            max_retries = 2
+            max_retries = 3
             last_error = None
 
             for attempt in range(max_retries):
                 if attempt > 0:
-                    _LOGGER.debug("Retry %d/%d for %s after stream timeout", attempt + 1, max_retries, entity_id)
-                    await asyncio.sleep(0.5)  # Brief pause before retry
+                    # Increasing delay between retries to let camera stabilize
+                    delay = 0.5 * attempt  # 0.5s, 1.0s
+                    _LOGGER.debug("Retry %d/%d for %s (waiting %.1fs)", attempt + 1, max_retries, entity_id, delay)
+                    await asyncio.sleep(delay)
 
                 video_proc = await asyncio.create_subprocess_exec(
                     *video_cmd,
