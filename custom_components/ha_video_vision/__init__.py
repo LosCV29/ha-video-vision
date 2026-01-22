@@ -801,10 +801,9 @@ class VideoAnalyzer:
         ])
 
         if stream_url.startswith("rtsp://"):
-            cmd.extend([
-                "-rtsp_transport", "tcp",
-                "-rtsp_flags", "prefer_tcp",                # Prefer TCP for reliability
-            ])
+            # Use UDP for faster connection (no TCP handshake overhead)
+            # Reolink and similar local cameras work better with UDP
+            cmd.extend(["-rtsp_transport", "udp"])
 
         cmd.extend(["-i", stream_url, "-t", str(duration)])
 
@@ -962,7 +961,7 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
 
-            # Build and execute ffmpeg recording command
+            # Build and execute ffmpeg recording command - IMMEDIATELY, no delays
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
 
             # Log the FFmpeg command (mask credentials in URL)
@@ -975,16 +974,22 @@ class VideoAnalyzer:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            # Longer timeout for unstable streams (doorbell cameras often restart stream on motion)
-            # 20 seconds should handle connection delays + recording time
-            _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 20)
+            try:
+                # Timeout: recording duration + 10s buffer for connection
+                _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 10)
+            except asyncio.TimeoutError:
+                # Kill hung process and fail
+                try:
+                    video_proc.kill()
+                    await video_proc.wait()
+                except Exception:
+                    pass
+                raise RuntimeError("Recording timeout - camera stream not responding")
 
             if video_proc.returncode != 0:
                 stderr_text = stderr.decode() if stderr else "No error output"
-                # Log more of stderr to capture actual error (not just FFmpeg banner)
-                _LOGGER.error("FFmpeg failed (code %d) for %s. Full stderr:\n%s",
-                            video_proc.returncode, entity_id, stderr_text[-2000:])
-                raise RuntimeError(f"FFmpeg failed: {stderr_text[-500:]}")
+                _LOGGER.error("FFmpeg failed (code %d) for %s: %s", video_proc.returncode, entity_id, stderr_text[-500:])
+                raise RuntimeError(f"Recording failed: {stderr_text[-200:]}")
 
             # Read video and extract frames
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
