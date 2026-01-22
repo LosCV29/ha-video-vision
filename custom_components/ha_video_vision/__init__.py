@@ -806,6 +806,12 @@ class VideoAnalyzer:
 
         cmd.extend(["-i", stream_url, "-t", str(duration)])
 
+        # Explicitly map video stream (fixes Reolink cameras that don't report pixel format)
+        cmd.extend(["-map", "0:v:0"])
+
+        # Force pixel format for streams that don't report it properly
+        cmd.extend(["-pix_fmt", "yuv420p"])
+
         # Always re-encode for reliability (stream copy can fail on keyframe issues)
         # ultrafast + zerolatency is nearly as fast as copy but more reliable
         if self.video_fps_percent < 100:
