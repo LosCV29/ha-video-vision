@@ -961,59 +961,35 @@ class VideoAnalyzer:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as ff:
                 frame_path = ff.name
 
-            # Build and execute ffmpeg recording command
+            # Build and execute ffmpeg recording command - IMMEDIATELY, no delays
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
 
             # Log the FFmpeg command (mask credentials in URL)
             masked_cmd = [re.sub(r'://[^:]+:[^@]+@', '://****:****@', str(c)) for c in video_cmd]
             _LOGGER.debug("FFmpeg command for %s: %s", entity_id, ' '.join(masked_cmd))
 
-            # Retry logic for unstable doorbell streams that may be busy on motion trigger
-            max_retries = 3
-            last_error = None
+            video_proc = await asyncio.create_subprocess_exec(
+                *video_cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-            for attempt in range(max_retries):
-                if attempt > 0:
-                    # Increasing delay between retries to let camera stabilize
-                    delay = 0.5 * attempt  # 0.5s, 1.0s
-                    _LOGGER.debug("Retry %d/%d for %s (waiting %.1fs)", attempt + 1, max_retries, entity_id, delay)
-                    await asyncio.sleep(delay)
-
-                video_proc = await asyncio.create_subprocess_exec(
-                    *video_cmd,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE
-                )
-
+            try:
+                # Timeout: recording duration + 10s buffer for connection
+                _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 10)
+            except asyncio.TimeoutError:
+                # Kill hung process and fail
                 try:
-                    # Timeout for recording (duration + buffer for connection)
-                    _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
-
-                    if video_proc.returncode == 0:
-                        break  # Success
-                    else:
-                        last_error = stderr.decode() if stderr else "No error output"
-                        _LOGGER.warning("FFmpeg attempt %d failed for %s: %s", attempt + 1, entity_id, last_error[-200:])
-
-                except asyncio.TimeoutError:
-                    # Kill the hung process
-                    try:
-                        video_proc.kill()
-                        await video_proc.wait()
-                    except Exception:
-                        pass
-                    last_error = "Stream connection timeout - camera may be busy"
-                    _LOGGER.warning("FFmpeg timeout on attempt %d for %s", attempt + 1, entity_id)
-            else:
-                # All retries failed
-                raise RuntimeError(f"FFmpeg failed after {max_retries} attempts: {last_error}")
+                    video_proc.kill()
+                    await video_proc.wait()
+                except Exception:
+                    pass
+                raise RuntimeError("Recording timeout - camera stream not responding")
 
             if video_proc.returncode != 0:
                 stderr_text = stderr.decode() if stderr else "No error output"
-                # Log more of stderr to capture actual error (not just FFmpeg banner)
-                _LOGGER.error("FFmpeg failed (code %d) for %s. Full stderr:\n%s",
-                            video_proc.returncode, entity_id, stderr_text[-2000:])
-                raise RuntimeError(f"FFmpeg failed: {stderr_text[-500:]}")
+                _LOGGER.error("FFmpeg failed (code %d) for %s: %s", video_proc.returncode, entity_id, stderr_text[-500:])
+                raise RuntimeError(f"Recording failed: {stderr_text[-200:]}")
 
             # Read video and extract frames
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
