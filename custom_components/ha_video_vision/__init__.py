@@ -769,20 +769,25 @@ class VideoAnalyzer:
         return None
 
     async def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
-        """Build ffmpeg command with low-latency optimizations for instant recording."""
+        """Build ffmpeg command with ultra-low-latency optimizations for instant recording."""
         cmd = ["ffmpeg", "-y"]
 
-        # LOW LATENCY FLAGS - minimize time before recording starts
-        # Balance between fast startup and reliable stream detection
+        # ULTRA LOW LATENCY FLAGS - minimize time before recording starts
+        # Critical for doorbell cameras where timing matters
         cmd.extend([
-            "-fflags", "nobuffer",          # Don't buffer input - start immediately
-            "-flags", "low_delay",          # Low latency decoding mode
-            "-probesize", "32768",          # 32KB probe size - enough to detect stream format
-            "-analyzeduration", "1000000",  # 1 second analysis - allows codec detection
+            "-fflags", "+nobuffer+discardcorrupt",  # No buffering, allow starting mid-stream
+            "-flags", "low_delay",                   # Low latency decoding mode
+            "-probesize", "8192",                    # 8KB probe - minimal for RTSP
+            "-analyzeduration", "500000",            # 0.5 second analysis - fast codec detection
+            "-max_delay", "0",                       # No packet delay
+            "-avioflags", "direct",                  # Direct I/O, skip buffering
         ])
 
         if stream_url.startswith("rtsp://"):
-            cmd.extend(["-rtsp_transport", "tcp"])
+            cmd.extend([
+                "-rtsp_transport", "tcp",
+                "-stimeout", "5000000",              # 5 second connection timeout (microseconds)
+            ])
 
         # Apply FPS reduction if configured (100% = full fps, 50% = half fps)
         # Use fps filter to reduce frame rate for faster processing
@@ -953,7 +958,9 @@ class VideoAnalyzer:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 10)
+            # Longer timeout for unstable streams (doorbell cameras often restart stream on motion)
+            # 20 seconds should handle connection delays + recording time
+            _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 20)
 
             if video_proc.returncode != 0:
                 stderr_text = stderr.decode() if stderr else "No error output"
