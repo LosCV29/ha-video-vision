@@ -922,16 +922,13 @@ class VideoAnalyzer:
             frame_position = self.notification_frame_position
 
         if not stream_url:
-            # No stream URL (cloud camera like Ring/Nest) - use snapshot only
-            _LOGGER.info(
-                "Cloud camera detected: %s - using optimized snapshot mode. "
-                "For video analysis, consider using ring-mqtt add-on for RTSP streaming.",
+            # No stream URL - VIDEO ONLY mode means this camera won't work
+            _LOGGER.error(
+                "No RTSP stream available for %s. VIDEO ONLY mode requires a streaming URL. "
+                "For cloud cameras (Ring/Nest), install ring-mqtt or similar add-on for RTSP streaming.",
                 entity_id
             )
-            frame_bytes = await self._get_camera_snapshot(
-                entity_id, retries=3, delay=1.0, is_cloud_camera=True
-            )
-            return video_bytes, frame_bytes, None
+            raise RuntimeError(f"No RTSP stream available for {entity_id} - video only mode requires streaming")
 
         video_path = None
         frame_path = None
@@ -980,31 +977,30 @@ class VideoAnalyzer:
                     *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
 
-                # Start face rec frame extraction in parallel if different position
+                # ALWAYS extract face rec frame from video (ensures sync with AI analysis)
+                # Separate extraction even if same position as notification frame
                 face_rec_proc = None
-                if (facial_recognition_frame_position is not None and
-                    facial_recognition_frame_position != frame_position):
-                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as frf:
-                        face_rec_frame_path = frf.name
-                    face_rec_frame_time = duration * (facial_recognition_frame_position / 100)
-                    face_rec_cmd = [
-                        "ffmpeg", "-y", "-ss", str(face_rec_frame_time), "-i", video_path,
-                        "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", face_rec_frame_path
-                    ]
-                    face_rec_proc = await asyncio.create_subprocess_exec(
-                        *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                    )
+                effective_face_rec_position = facial_recognition_frame_position if facial_recognition_frame_position is not None else frame_position
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as frf:
+                    face_rec_frame_path = frf.name
+                face_rec_frame_time = duration * (effective_face_rec_position / 100)
+                face_rec_cmd = [
+                    "ffmpeg", "-y", "-ss", str(face_rec_frame_time), "-i", video_path,
+                    "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", face_rec_frame_path
+                ]
+                face_rec_proc = await asyncio.create_subprocess_exec(
+                    *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
 
-                # Wait for extractions
+                # Wait for extractions (both always run now)
                 await asyncio.wait_for(frame_proc.wait(), timeout=10)
-                if face_rec_proc:
-                    await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
+                await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
 
-                # Read extracted frames
+                # Read extracted frames (both always extracted now)
                 if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
                     async with aiofiles.open(frame_path, 'rb') as f:
                         frame_bytes = await f.read()
-                if face_rec_frame_path and os.path.exists(face_rec_frame_path) and os.path.getsize(face_rec_frame_path) > 0:
+                if os.path.exists(face_rec_frame_path) and os.path.getsize(face_rec_frame_path) > 0:
                     async with aiofiles.open(face_rec_frame_path, 'rb') as f:
                         face_rec_frame_bytes = await f.read()
 
@@ -1061,40 +1057,29 @@ class VideoAnalyzer:
                 "error": f"Camera '{camera_input}' not found. Available: {available}"
             }
 
-        # SPEED: Start stream URL lookup AND snapshot capture IMMEDIATELY in parallel
-        # These are the two async operations that take time - do them simultaneously
-        _LOGGER.debug("Starting parallel stream URL + snapshot for %s", entity_id)
-        stream_url_task = asyncio.create_task(self._get_stream_url(entity_id))
-        snapshot_task = asyncio.create_task(self._get_camera_snapshot(entity_id))
+        # Get stream URL first to determine camera type
+        _LOGGER.debug("Getting stream URL for %s", entity_id)
+        stream_url = await self._get_stream_url(entity_id)
 
-        # Get metadata while waiting (fast sync operations)
+        # Get metadata (fast sync operations)
         state = self.hass.states.get(entity_id)
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         safe_name = entity_id.replace("camera.", "").replace(".", "_")
 
-        # Wait for stream URL - we need this to start recording
-        stream_url = await stream_url_task
-
-        # NOW start video recording with the stream URL (FFmpeg starts immediately)
-        video_task = asyncio.create_task(
-            self._record_video_and_extract_frames(
-                entity_id, duration, frame_position, facial_recognition_frame_position, stream_url
-            )
+        # Record video and extract frames - VIDEO ONLY mode, no snapshot fallback
+        # Extracts notification frame + face_rec frame from the recorded video
+        video_bytes, video_frame_bytes, face_rec_frame_bytes = await self._record_video_and_extract_frames(
+            entity_id, duration, frame_position, facial_recognition_frame_position, stream_url
         )
 
-        # Wait for snapshot (should already be done or nearly done)
-        immediate_snapshot = await snapshot_task
-
-        # Wait for video recording to complete
-        video_bytes, video_frame_bytes, face_rec_frame_bytes = await video_task
-
-        # Save the immediate snapshot for notification (faster than waiting for video frames)
+        # Save notification frame from video
+        # Using video frame ensures sync with AI analysis content
         snapshot_path = None
-        if immediate_snapshot:
-            snapshot_path = await self._save_snapshot_async(immediate_snapshot, safe_name)
+        if video_frame_bytes:
+            snapshot_path = await self._save_snapshot_async(video_frame_bytes, safe_name)
 
-        # Use immediate snapshot for notification display (for speed)
-        frame_bytes = immediate_snapshot or video_frame_bytes
+        # Frame for any image-based operations
+        frame_bytes = video_frame_bytes
 
         # Prepare prompt
         if user_query:
@@ -1110,12 +1095,14 @@ class VideoAnalyzer:
                 "Be concise (2-3 sentences)."
             )
 
-        # Save facial recognition frame separately if it exists and differs from notification frame
+        # Save facial recognition frame (extracted from video - VIDEO ONLY mode)
         face_rec_snapshot_task = None
         if face_rec_frame_bytes:
             face_rec_snapshot_task = asyncio.create_task(
                 self._save_snapshot_async(face_rec_frame_bytes, f"{safe_name}_face_rec")
             )
+        else:
+            _LOGGER.warning("No facial recognition frame extracted from video for %s", entity_id)
 
         # Send video to AI provider for analysis
         # The AI analyzes the entire video - no separate snapshot needed
@@ -1144,8 +1131,8 @@ class VideoAnalyzer:
             "animal_detected": animal_detected,
             "snapshot_path": snapshot_path,
             "snapshot_url": f"/media/local/ha_video_vision/{safe_name}_latest.jpg" if snapshot_path else None,
-            # Facial recognition uses separate frame if available, otherwise falls back to notification frame
-            "face_rec_snapshot_path": face_rec_snapshot_path or snapshot_path,
+            # Facial recognition frame: always extracted from video (no snapshot fallback)
+            "face_rec_snapshot_path": face_rec_snapshot_path,
             "provider_used": provider_used,
             "default_provider": self.provider,
         }
