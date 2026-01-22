@@ -804,8 +804,6 @@ class VideoAnalyzer:
             cmd.extend([
                 "-rtsp_transport", "tcp",
                 "-rtsp_flags", "prefer_tcp",                # Prefer TCP for reliability
-                "-stimeout", "5000000",                     # 5s connection timeout (microseconds)
-                "-buffer_size", "4096",                     # Minimal RTSP buffer
             ])
 
         cmd.extend(["-i", stream_url, "-t", str(duration)])
