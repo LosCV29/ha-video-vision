@@ -8,5 +8,5 @@
   "issue_tracker": "https://github.com/LosCV29/ha-video-vision/issues",
   "iot_class": "local_polling",
   "requirements": ["aiohttp>=3.8.0", "aiofiles>=23.0.0"],
-  "version": "5.2.13"
+  "version": "5.2.14"
 }
