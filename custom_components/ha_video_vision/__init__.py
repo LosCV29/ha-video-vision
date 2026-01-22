@@ -801,27 +801,25 @@ class VideoAnalyzer:
         ])
 
         if stream_url.startswith("rtsp://"):
-            # Use UDP for faster connection (no TCP handshake overhead)
-            # Reolink and similar local cameras work better with UDP
-            cmd.extend(["-rtsp_transport", "udp"])
+            # TCP is more reliable than UDP (no packet loss)
+            cmd.extend(["-rtsp_transport", "tcp"])
 
         cmd.extend(["-i", stream_url, "-t", str(duration)])
 
-        # FAST OUTPUT - copy stream if possible, minimal processing
-        # Copy the H.264 stream directly (no re-encoding) for speed
-        # Only scale if FPS reduction is needed
+        # Always re-encode for reliability (stream copy can fail on keyframe issues)
+        # ultrafast + zerolatency is nearly as fast as copy but more reliable
         if self.video_fps_percent < 100:
             target_fps = max(8, int(30 * self.video_fps_percent / 100))
-            cmd.extend([
-                "-vf", f"fps={target_fps},scale={self.video_width}:-2",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-tune", "zerolatency",
-                "-crf", "28",
-            ])
+            cmd.extend(["-vf", f"fps={target_fps},scale={self.video_width}:-2"])
         else:
-            # Direct stream copy - FASTEST possible (no transcoding)
-            cmd.extend(["-c:v", "copy"])
+            cmd.extend(["-vf", f"scale={self.video_width}:-2"])
+
+        cmd.extend([
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-crf", "28",
+        ])
 
         cmd.extend(["-an", output_path])
 
@@ -990,6 +988,10 @@ class VideoAnalyzer:
                 stderr_text = stderr.decode() if stderr else "No error output"
                 _LOGGER.error("FFmpeg failed (code %d) for %s: %s", video_proc.returncode, entity_id, stderr_text[-500:])
                 raise RuntimeError(f"Recording failed: {stderr_text[-200:]}")
+
+            # Verify video was actually recorded
+            if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+                raise RuntimeError("Recording produced empty video - no data received from camera stream")
 
             # Read video and extract frames
             if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
