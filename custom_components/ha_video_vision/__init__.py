@@ -356,12 +356,14 @@ class VideoAnalyzer:
     """Class to handle video analysis with auto-discovered cameras."""
 
     CAMERA_CACHE_TTL = 300  # 5 minutes
+    STREAM_URL_CACHE_TTL = 60  # 1 minute cache for stream URLs
 
     def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
         """Initialize the analyzer."""
         self.hass = hass
         self._session = async_get_clientsession(hass)
         self._camera_cache: tuple[list[dict], float] | None = None
+        self._stream_url_cache: dict[str, tuple[str, float]] = {}  # entity_id -> (url, timestamp)
         self.update_config(config)
 
     def update_config(self, config: dict[str, Any]) -> None:
@@ -674,7 +676,22 @@ class VideoAnalyzer:
 
         For cloud cameras (Ring, Nest, etc.), this may require activating the stream first.
         Tries multiple methods to obtain a valid stream URL.
+        Uses caching to minimize latency on repeated calls.
         """
+        # Check cache first for minimal latency
+        import time
+        now = time.time()
+        if entity_id in self._stream_url_cache:
+            cached_url, cached_time = self._stream_url_cache[entity_id]
+            if now - cached_time < self.STREAM_URL_CACHE_TTL:
+                _LOGGER.debug("Using cached stream URL for %s", entity_id)
+                return cached_url
+
+        def cache_and_return(url: str) -> str:
+            """Cache the stream URL and return it."""
+            self._stream_url_cache[entity_id] = (url, now)
+            return url
+
         # Method 1: Standard stream source retrieval
         try:
             stream_url = await async_get_stream_source(self.hass, entity_id)
@@ -682,7 +699,7 @@ class VideoAnalyzer:
                 # Mask credentials for logging
                 masked_url = re.sub(r'://[^:]+:[^@]+@', '://****:****@', stream_url)
                 _LOGGER.debug("Got stream URL for %s via async_get_stream_source: %s", entity_id, masked_url)
-                return stream_url
+                return cache_and_return(stream_url)
         except Exception as e:
             _LOGGER.debug("async_get_stream_source failed for %s: %s", entity_id, e)
 
@@ -696,7 +713,7 @@ class VideoAnalyzer:
                     stream_source = state.attributes.get(attr_name)
                     if stream_source and stream_source.startswith("rtsp://"):
                         _LOGGER.debug("Got stream URL for %s from %s attribute", entity_id, attr_name)
-                        return stream_source
+                        return cache_and_return(stream_source)
 
                 # Check for frontend_stream_type - indicates streaming capability
                 stream_type = state.attributes.get("frontend_stream_type")
@@ -730,7 +747,7 @@ class VideoAnalyzer:
                             "Got stream URL for %s from ring-mqtt info sensor %s",
                             entity_id, sensor_id
                         )
-                        return stream_source
+                        return cache_and_return(stream_source)
         except Exception as e:
             _LOGGER.debug("ring-mqtt info sensor check failed for %s: %s", entity_id, e)
 
@@ -755,7 +772,7 @@ class VideoAnalyzer:
                     stream_url = await async_get_stream_source(self.hass, entity_id)
                     if stream_url:
                         _LOGGER.debug("Got stream URL for %s after activation", entity_id)
-                        return stream_url
+                        return cache_and_return(stream_url)
         except Exception as e:
             _LOGGER.debug("Camera activation attempt failed for %s: %s", entity_id, e)
 
@@ -769,45 +786,47 @@ class VideoAnalyzer:
         return None
 
     async def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
-        """Build ffmpeg command with ultra-low-latency optimizations for instant recording."""
+        """Build ffmpeg command with ZERO-latency optimizations - every millisecond counts."""
         cmd = ["ffmpeg", "-y"]
 
-        # ULTRA LOW LATENCY FLAGS - minimize time before recording starts
-        # Critical for doorbell cameras where timing matters
+        # ZERO LATENCY FLAGS - absolute minimum startup time
         cmd.extend([
-            "-fflags", "+nobuffer+discardcorrupt",  # No buffering, allow starting mid-stream
-            "-flags", "low_delay",                   # Low latency decoding mode
-            "-probesize", "8192",                    # 8KB probe - minimal for RTSP
-            "-analyzeduration", "500000",            # 0.5 second analysis - fast codec detection
-            "-max_delay", "0",                       # No packet delay
-            "-avioflags", "direct",                  # Direct I/O, skip buffering
+            "-fflags", "+nobuffer+discardcorrupt+genpts",  # No buffer, start mid-stream, fix timestamps
+            "-flags", "low_delay",                          # Low latency decoding
+            "-probesize", "4096",                           # 4KB - bare minimum probe
+            "-analyzeduration", "0",                        # Skip analysis - trust the stream
+            "-max_delay", "0",                              # Zero packet delay
+            "-reorder_queue_size", "0",                     # No packet reordering queue
+            "-thread_queue_size", "8",                      # Minimal thread queue
         ])
 
         if stream_url.startswith("rtsp://"):
             cmd.extend([
                 "-rtsp_transport", "tcp",
-                "-stimeout", "5000000",              # 5 second connection timeout (microseconds)
+                "-rtsp_flags", "prefer_tcp",                # Prefer TCP for reliability
+                "-stimeout", "5000000",                     # 5s connection timeout (microseconds)
+                "-buffer_size", "4096",                     # Minimal RTSP buffer
             ])
 
-        # Apply FPS reduction if configured (100% = full fps, 50% = half fps)
-        # Use fps filter to reduce frame rate for faster processing
-        fps_filter = ""
-        if self.video_fps_percent < 100:
-            # Target common frame rates based on percentage
-            # 100% = source fps, 50% = 15fps, 25% = 8fps
-            target_fps = max(8, int(30 * self.video_fps_percent / 100))
-            fps_filter = f"fps={target_fps},"
+        cmd.extend(["-i", stream_url, "-t", str(duration)])
 
-        cmd.extend([
-            "-i", stream_url,
-            "-t", str(duration),
-            "-vf", f"{fps_filter}scale={self.video_width}:-2",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "28",
-            "-an",
-            output_path
-        ])
+        # FAST OUTPUT - copy stream if possible, minimal processing
+        # Copy the H.264 stream directly (no re-encoding) for speed
+        # Only scale if FPS reduction is needed
+        if self.video_fps_percent < 100:
+            target_fps = max(8, int(30 * self.video_fps_percent / 100))
+            cmd.extend([
+                "-vf", f"fps={target_fps},scale={self.video_width}:-2",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-tune", "zerolatency",
+                "-crf", "28",
+            ])
+        else:
+            # Direct stream copy - FASTEST possible (no transcoding)
+            cmd.extend(["-c:v", "copy"])
+
+        cmd.extend(["-an", output_path])
 
         return cmd
 
