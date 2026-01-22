@@ -993,13 +993,8 @@ class VideoAnalyzer:
                         stderr_text = stderr.decode() if stderr else "No error output"
                         last_error = f"Recording failed: {stderr_text[-200:]}"
                         if attempt < max_retries:
-                            # Longer delay for "503 Chn Offline" errors - camera in deep sleep
-                            if "503" in stderr_text or "Offline" in stderr_text or "5XX" in stderr_text:
-                                _LOGGER.warning("Camera %s is offline/sleeping (attempt %d), waiting 3s for wake-up...", entity_id, attempt + 1)
-                                await asyncio.sleep(3)
-                            else:
-                                _LOGGER.warning("FFmpeg attempt %d failed for %s, retrying in 1s...", attempt + 1, entity_id)
-                                await asyncio.sleep(1)
+                            _LOGGER.warning("FFmpeg attempt %d failed for %s, retrying in 1s...", attempt + 1, entity_id)
+                            await asyncio.sleep(1)
                         else:
                             _LOGGER.error("FFmpeg failed (code %d) for %s: %s", video_proc.returncode, entity_id, stderr_text[-500:])
                             raise RuntimeError(last_error)
