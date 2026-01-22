@@ -100,8 +100,8 @@ blueprint:
 
     frame_position:
       name: "Notification Frame Position (%)"
-      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame."
-      default: 50
+      description: "Which frame from the video to use for the notification image. 0% = first frame (fastest capture), 50% = middle, 100% = last frame."
+      default: 0
       selector:
         number:
           min: 0

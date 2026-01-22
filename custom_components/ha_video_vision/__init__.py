@@ -994,7 +994,10 @@ class VideoAnalyzer:
                 raise RuntimeError("Recording produced empty video - no data received from camera stream")
 
             # Read video and extract frames
-            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            video_size = os.path.getsize(video_path)
+            _LOGGER.info("Recorded %d second video: %.1f KB", duration, video_size/1024)
+
+            if os.path.exists(video_path) and video_size > 0:
                 async with aiofiles.open(video_path, 'rb') as f:
                     video_bytes = await f.read()
 
@@ -1267,7 +1270,8 @@ class VideoAnalyzer:
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
         system_prompt = self._build_system_prompt(entity_id)
 
-        _LOGGER.debug("Sending to AI: %s", effective_provider)
+        video_size = len(video_bytes) if video_bytes else 0
+        _LOGGER.info("Sending VIDEO to %s: %d bytes (%.1f KB)", effective_provider, video_size, video_size/1024)
 
         if effective_provider == PROVIDER_GOOGLE:
             result = await self._analyze_google(
