@@ -969,15 +969,43 @@ class VideoAnalyzer:
             masked_cmd = [re.sub(r'://[^:]+:[^@]+@', '://****:****@', str(c)) for c in video_cmd]
             _LOGGER.debug("FFmpeg command for %s: %s", entity_id, ' '.join(masked_cmd))
 
-            video_proc = await asyncio.create_subprocess_exec(
-                *video_cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # Retry logic for unstable doorbell streams that may be busy on motion trigger
+            max_retries = 2
+            last_error = None
 
-            # Longer timeout for unstable streams (doorbell cameras often restart stream on motion)
-            # 20 seconds should handle connection delays + recording time
-            _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 20)
+            for attempt in range(max_retries):
+                if attempt > 0:
+                    _LOGGER.debug("Retry %d/%d for %s after stream timeout", attempt + 1, max_retries, entity_id)
+                    await asyncio.sleep(0.5)  # Brief pause before retry
+
+                video_proc = await asyncio.create_subprocess_exec(
+                    *video_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE
+                )
+
+                try:
+                    # Timeout for recording (duration + buffer for connection)
+                    _, stderr = await asyncio.wait_for(video_proc.communicate(), timeout=duration + 15)
+
+                    if video_proc.returncode == 0:
+                        break  # Success
+                    else:
+                        last_error = stderr.decode() if stderr else "No error output"
+                        _LOGGER.warning("FFmpeg attempt %d failed for %s: %s", attempt + 1, entity_id, last_error[-200:])
+
+                except asyncio.TimeoutError:
+                    # Kill the hung process
+                    try:
+                        video_proc.kill()
+                        await video_proc.wait()
+                    except Exception:
+                        pass
+                    last_error = "Stream connection timeout - camera may be busy"
+                    _LOGGER.warning("FFmpeg timeout on attempt %d for %s", attempt + 1, entity_id)
+            else:
+                # All retries failed
+                raise RuntimeError(f"FFmpeg failed after {max_retries} attempts: {last_error}")
 
             if video_proc.returncode != 0:
                 stderr_text = stderr.decode() if stderr else "No error output"
