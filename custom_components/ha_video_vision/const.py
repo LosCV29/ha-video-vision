@@ -133,7 +133,6 @@ ATTR_CAMERA: Final = "camera"
 ATTR_DURATION: Final = "duration"
 ATTR_USER_QUERY: Final = "user_query"
 ATTR_FACIAL_RECOGNITION: Final = "facial_recognition"
-ATTR_FACIAL_RECOGNITION_FRAME_POSITION: Final = "facial_recognition_frame_position"
 ATTR_REMEMBER: Final = "remember"
 ATTR_FRAME_POSITION: Final = "frame_position"
 

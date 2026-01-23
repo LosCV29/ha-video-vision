@@ -30,21 +30,11 @@ analyze_camera:
           multiline: true
     facial_recognition:
       name: Facial Recognition
-      description: Enable facial recognition for this analysis. Only runs when enabled - no slowdown for manual calls.
+      description: Enable facial recognition for this analysis. Analyzes the ENTIRE video against all reference photos for better accuracy.
       required: false
       default: false
       selector:
         boolean:
-    facial_recognition_frame_position:
-      name: Facial Recognition Frame Position
-      description: Which frame to use for facial recognition (0-100%). SEPARATE from notification image. If not set, uses the same frame as the notification.
-      required: false
-      selector:
-        number:
-          min: 0
-          max: 100
-          step: 10
-          unit_of_measurement: "%"
     remember:
       name: Save to Timeline
       description: Save this analysis to the Timeline calendar for historical tracking. View in Calendar panel or dashboard.
@@ -88,7 +78,7 @@ record_clip:
 
 identify_faces:
   name: Identify Faces
-  description: Identify faces in an image using the Facial Recognition add-on (github.com/LosCV29/ha-addons).
+  description: Identify faces in an image using LLM-based comparison against reference photos in /config/camera_faces/. For video-based recognition, use the facial_recognition option in analyze_camera instead.
   fields:
     image_path:
       name: Image Path
@@ -97,23 +87,4 @@ identify_faces:
       example: "/media/ha_video_vision/driveway_latest.jpg"
       selector:
         text:
-    server_url:
-      name: Server URL
-      description: URL of the facial recognition server. Leave empty to use the configured URL from integration settings.
-      required: false
-      default: ""
-      example: "http://localhost:8100"
-      selector:
-        text:
-    min_confidence:
-      name: Minimum Confidence
-      description: Minimum confidence percentage to include in results
-      required: false
-      default: 50
-      selector:
-        number:
-          min: 0
-          max: 100
-          step: 5
-          unit_of_measurement: "%"
 
