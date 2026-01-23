@@ -812,7 +812,8 @@ class VideoAnalyzer:
 
         if stream_url.startswith("rtsp://"):
             # TCP is more reliable than UDP (no packet loss)
-            cmd.extend(["-rtsp_transport", "tcp"])
+            # stimeout: 10 second connection timeout (in microseconds) for cameras waking from standby
+            cmd.extend(["-rtsp_transport", "tcp", "-stimeout", "10000000"])
 
         cmd.extend(["-i", stream_url, "-t", str(duration)])
 
@@ -851,7 +852,8 @@ class VideoAnalyzer:
         cmd = ["ffmpeg", "-y"]
 
         if stream_url.startswith("rtsp://"):
-            cmd.extend(["-rtsp_transport", "tcp"])
+            # stimeout: 10 second connection timeout (in microseconds) for cameras waking from standby
+            cmd.extend(["-rtsp_transport", "tcp", "-stimeout", "10000000"])
 
         cmd.extend(["-i", stream_url, "-frames:v", "1"])
 
