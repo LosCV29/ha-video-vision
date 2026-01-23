@@ -404,7 +404,7 @@ See [docs/RING_MQTT_SETUP.md](docs/RING_MQTT_SETUP.md) for complete setup guide.
 ## 📄 License
 
 This project is dual-licensed:
-- **MIT License** - for new contributions by Carlos Munoz
+- **MIT License** - for new contributions by Carlos Lopes
 - **Apache License 2.0** - for code derived from [ha-llmvision](https://github.com/valentinfrlch/ha-llmvision)
 
 See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
