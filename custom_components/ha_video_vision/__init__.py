@@ -85,7 +85,6 @@ from .const import (
     ATTR_DURATION,
     ATTR_USER_QUERY,
     ATTR_FACIAL_RECOGNITION,
-    ATTR_FACIAL_RECOGNITION_FRAME_POSITION,
     ATTR_REMEMBER,
     ATTR_FRAME_POSITION,
     # Detection Keywords
@@ -167,8 +166,6 @@ SERVICE_ANALYZE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
         vol.Optional(ATTR_USER_QUERY, default=""): cv.string,
         vol.Optional(ATTR_FACIAL_RECOGNITION, default=False): cv.boolean,
-        # Separate frame position for facial recognition (default 50% = middle of video)
-        vol.Optional(ATTR_FACIAL_RECOGNITION_FRAME_POSITION): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
         vol.Optional(ATTR_REMEMBER, default=False): cv.boolean,
         # Frame position for notification image (0=first, 50=middle, 100=last)
         vol.Optional(ATTR_FRAME_POSITION): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
@@ -247,18 +244,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         do_remember = call.data.get(ATTR_REMEMBER, False)
         # Frame position for notification (None = use config default)
         frame_position = call.data.get(ATTR_FRAME_POSITION)
-        # Separate frame position for facial recognition (allows capturing face at different time)
-        facial_recognition_frame_position = call.data.get(ATTR_FACIAL_RECOGNITION_FRAME_POSITION)
 
         result = await analyzer.analyze_camera(
-            camera, duration, user_query, frame_position, facial_recognition_frame_position
+            camera, duration, user_query, frame_position
         )
 
-        # Run LLM-based facial recognition if enabled
-        face_rec_path = result.get("face_rec_snapshot_path") or result.get("snapshot_path")
+        # Run LLM-based facial recognition on the ENTIRE VIDEO if enabled
+        video_bytes = result.get("_video_bytes")
         facial_rec_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
-        if do_facial_recognition and facial_rec_enabled and result.get("success") and face_rec_path:
-            face_result = await analyzer.identify_faces(face_rec_path)
+        if do_facial_recognition and facial_rec_enabled and result.get("success") and video_bytes:
+            face_result = await analyzer.identify_faces_in_video(video_bytes)
             result["face_recognition"] = face_result
 
         # Save to timeline if remember is enabled
@@ -947,19 +942,18 @@ class VideoAnalyzer:
 
     async def _record_video_and_extract_frames(
         self, entity_id: str, duration: int, frame_position: int | None = None,
-        facial_recognition_frame_position: int | None = None, stream_url: str | None = None
-    ) -> tuple[bytes | None, bytes | None, bytes | None]:
-        """Record video and extract frames. Unified method for all video capture.
+        stream_url: str | None = None
+    ) -> tuple[bytes | None, bytes | None]:
+        """Record video and extract notification frame. Unified method for all video capture.
 
         Args:
             entity_id: Camera entity ID
             duration: Recording duration in seconds
             frame_position: Position in video for notification frame (0-100%)
-            facial_recognition_frame_position: Separate position for face rec frame
             stream_url: Pre-fetched stream URL (if None, will be fetched)
 
         Returns:
-            Tuple of (video_bytes, frame_bytes, face_rec_frame_bytes)
+            Tuple of (video_bytes, frame_bytes)
         """
         # Fetch stream URL if not provided
         if stream_url is None:
@@ -967,7 +961,6 @@ class VideoAnalyzer:
 
         video_bytes = None
         frame_bytes = None
-        face_rec_frame_bytes = None
 
         # Use configured default if not specified
         if frame_position is None:
@@ -984,7 +977,6 @@ class VideoAnalyzer:
 
         video_path = None
         frame_path = None
-        face_rec_frame_path = None
 
         try:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as vf:
@@ -1060,7 +1052,7 @@ class VideoAnalyzer:
                 async with aiofiles.open(video_path, 'rb') as f:
                     video_bytes = await f.read()
 
-                # Extract frames in parallel for speed
+                # Extract notification frame from video
                 frame_time = duration * (frame_position / 100)
                 frame_cmd = [
                     "ffmpeg", "-y", "-ss", str(frame_time), "-i", video_path,
@@ -1070,40 +1062,21 @@ class VideoAnalyzer:
                     *frame_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
 
-                # ALWAYS extract face rec frame from video (ensures sync with AI analysis)
-                # Separate extraction even if same position as notification frame
-                face_rec_proc = None
-                effective_face_rec_position = facial_recognition_frame_position if facial_recognition_frame_position is not None else frame_position
-                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as frf:
-                    face_rec_frame_path = frf.name
-                face_rec_frame_time = duration * (effective_face_rec_position / 100)
-                face_rec_cmd = [
-                    "ffmpeg", "-y", "-ss", str(face_rec_frame_time), "-i", video_path,
-                    "-frames:v", "1", "-q:v", self._get_ffmpeg_quality(), "-f", "mjpeg", face_rec_frame_path
-                ]
-                face_rec_proc = await asyncio.create_subprocess_exec(
-                    *face_rec_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
-
-                # Wait for extractions (both always run now)
+                # Wait for frame extraction
                 await asyncio.wait_for(frame_proc.wait(), timeout=10)
-                await asyncio.wait_for(face_rec_proc.wait(), timeout=10)
 
-                # Read extracted frames (both always extracted now)
+                # Read extracted frame
                 if os.path.exists(frame_path) and os.path.getsize(frame_path) > 0:
                     async with aiofiles.open(frame_path, 'rb') as f:
                         frame_bytes = await f.read()
-                if os.path.exists(face_rec_frame_path) and os.path.getsize(face_rec_frame_path) > 0:
-                    async with aiofiles.open(face_rec_frame_path, 'rb') as f:
-                        face_rec_frame_bytes = await f.read()
 
-            return video_bytes, frame_bytes, face_rec_frame_bytes
+            return video_bytes, frame_bytes
 
         except Exception as e:
             _LOGGER.error("Error recording video from %s: %s", entity_id, e)
             raise  # No image fallback - video or nothing
         finally:
-            for path in [video_path, frame_path, face_rec_frame_path]:
+            for path in [video_path, frame_path]:
                 if path and os.path.exists(path):
                     try:
                         os.remove(path)
@@ -1141,7 +1114,7 @@ class VideoAnalyzer:
 
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = "",
-        frame_position: int | None = None, facial_recognition_frame_position: int | None = None
+        frame_position: int | None = None
     ) -> dict[str, Any]:
         """Analyze camera using VIDEO and AI vision.
 
@@ -1152,9 +1125,6 @@ class VideoAnalyzer:
             frame_position: Position in video to extract notification frame (0-100%).
                           0 = first frame, 50 = middle, 100 = last frame.
                           None = use configured default.
-            facial_recognition_frame_position: Separate frame position for facial recognition.
-                          If different from notification frame_position, extracts a separate frame.
-                          None = use same frame as notification.
         """
         duration = duration if duration is not None else self.video_duration
 
@@ -1179,10 +1149,9 @@ class VideoAnalyzer:
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         safe_name = entity_id.replace("camera.", "").replace(".", "_")
 
-        # Record video and extract frames - VIDEO ONLY mode, no snapshot fallback
-        # Extracts notification frame + face_rec frame from the recorded video
-        video_bytes, video_frame_bytes, face_rec_frame_bytes = await self._record_video_and_extract_frames(
-            entity_id, duration, frame_position, facial_recognition_frame_position, stream_url
+        # Record video and extract notification frame - VIDEO ONLY mode
+        video_bytes, video_frame_bytes = await self._record_video_and_extract_frames(
+            entity_id, duration, frame_position, stream_url
         )
 
         # Save notification frame from video
@@ -1213,15 +1182,6 @@ class VideoAnalyzer:
                 "Be concise (2-3 sentences)."
             )
 
-        # Save facial recognition frame (extracted from video - VIDEO ONLY mode)
-        face_rec_snapshot_task = None
-        if face_rec_frame_bytes:
-            face_rec_snapshot_task = asyncio.create_task(
-                self._save_snapshot_async(face_rec_frame_bytes, f"{safe_name}_face_rec")
-            )
-        else:
-            _LOGGER.warning("No facial recognition frame extracted from video for %s", entity_id)
-
         # Send video to AI provider for analysis
         # The AI analyzes the entire video - no separate snapshot needed
         description, provider_used = await self._analyze_with_provider(
@@ -1229,11 +1189,6 @@ class VideoAnalyzer:
         )
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
-
-        # Wait for face_rec snapshot to complete if needed
-        face_rec_snapshot_path = None
-        if face_rec_snapshot_task:
-            face_rec_snapshot_path = await face_rec_snapshot_task
 
         # Check for person/animal-related words in AI description
         description_lower = (description or "").lower()
@@ -1252,8 +1207,8 @@ class VideoAnalyzer:
             # Video saved for verification/debugging
             "video_path": video_save_path,
             "video_url": f"/media/local/ha_video_vision/{safe_name}_latest.mp4" if video_save_path else None,
-            # Facial recognition frame: always extracted from video (no snapshot fallback)
-            "face_rec_snapshot_path": face_rec_snapshot_path,
+            # Video bytes for facial recognition (internal use)
+            "_video_bytes": video_bytes,
             "provider_used": provider_used,
             "default_provider": self.provider,
         }
@@ -1557,13 +1512,73 @@ class VideoAnalyzer:
 
         return reference_photos
 
+    async def identify_faces_in_video(self, video_bytes: bytes) -> dict[str, Any]:
+        """Identify faces in video using LLM-based comparison with reference photos.
+
+        Analyzes the ENTIRE video against all reference photos, allowing the LLM
+        to examine multiple frames and angles for better accuracy.
+
+        Args:
+            video_bytes: The recorded video to analyze
+
+        Returns:
+            Dict with identified people and confidence levels
+        """
+        _LOGGER.info("Video-based facial recognition: analyzing %d KB video", len(video_bytes) // 1024)
+
+        try:
+            # Check if facial recognition is enabled
+            if not self.facial_recognition_enabled:
+                return {
+                    "success": False,
+                    "error": "Facial recognition is disabled",
+                    "faces_detected": 0,
+                    "identified_people": [],
+                    "summary": "",
+                }
+
+            if not video_bytes:
+                return {
+                    "success": False,
+                    "error": "No video data provided",
+                    "faces_detected": 0,
+                    "identified_people": [],
+                    "summary": "",
+                }
+
+            # Load reference photos (up to 3 per person for all providers)
+            reference_photos = await self._load_reference_photos(max_photos_per_person=3)
+            if not reference_photos:
+                _LOGGER.warning("No reference photos found in %s", self.facial_recognition_directory)
+                return {
+                    "success": True,
+                    "faces_detected": 0,
+                    "identified_people": [],
+                    "summary": "No reference photos configured",
+                }
+
+            # Build the LLM prompt with reference photos
+            people_names = list(reference_photos.keys())
+            _LOGGER.info("Video face rec: comparing against %d people: %s", len(people_names), people_names)
+
+            # Use the LLM to identify faces in the entire video
+            result = await self._identify_faces_in_video_with_llm(video_bytes, reference_photos)
+
+            return result
+
+        except Exception as e:
+            _LOGGER.error("Video face rec error: %s", e)
+            return {"success": False, "error": str(e), "faces_detected": 0, "identified_people": [], "summary": ""}
+
     async def identify_faces(self, image_path: str) -> dict[str, Any]:
-        """Identify faces using LLM-based comparison with reference photos.
+        """Identify faces using LLM-based comparison with reference photos (legacy image-based).
 
         Uses the same LLM provider configured for video analysis to compare
         the camera frame against reference photos stored in the faces directory.
+
+        Note: For better accuracy, use identify_faces_in_video() with video data.
         """
-        _LOGGER.debug("LLM Face rec: %s", image_path)
+        _LOGGER.debug("LLM Face rec (image): %s", image_path)
 
         try:
             # Check if facial recognition is enabled
@@ -1660,6 +1675,59 @@ class VideoAnalyzer:
 
         return result
 
+    async def _identify_faces_in_video_with_llm(
+        self, video_bytes: bytes, reference_photos: dict[str, list[bytes]]
+    ) -> dict[str, Any]:
+        """Use the LLM to identify faces by comparing ENTIRE VIDEO to reference photos.
+
+        This analyzes all frames in the video, allowing the LLM to find faces at any point
+        and from multiple angles for better accuracy.
+        """
+        effective_provider, effective_model, effective_api_key = self._get_effective_provider()
+
+        # Build prompt parts with reference photos
+        people_names = list(reference_photos.keys())
+
+        # System prompt for video-based facial recognition
+        system_prompt = (
+            "You are a facial recognition assistant. You will be shown reference photos of known people, "
+            "followed by a VIDEO from a security camera. Your task is to identify if any person visible "
+            "ANYWHERE in the video matches any of the known people from the reference photos.\n\n"
+            "IMPORTANT RULES:\n"
+            "1. Carefully examine the ENTIRE video - faces may appear at any moment\n"
+            "2. Compare facial features: face shape, eyes, nose, mouth, hair, skin tone\n"
+            "3. Only identify someone if you are reasonably confident (40%+ certainty)\n"
+            "4. Consider lighting, angle, distance, and motion blur\n"
+            "5. Look at the person from multiple angles as they move through the video\n"
+            "6. If you cannot see faces clearly or no one matches, say 'No known faces'\n\n"
+            "RESPONSE FORMAT (strictly follow this):\n"
+            "- If you identify someone: 'PersonName XX%' where XX is your confidence (0-100)\n"
+            "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
+            "- If no match or no faces visible: 'No known faces'\n\n"
+            "Only respond with the identification result, nothing else."
+        )
+
+        # Build the user prompt describing the reference photos
+        user_prompt = f"I have reference photos for {len(people_names)} people: {', '.join(people_names)}.\n\n"
+        user_prompt += "First, I'll show you the reference photos for each person, then a VIDEO to analyze.\n"
+        user_prompt += "Examine the entire video carefully to identify any known faces.\n\n"
+
+        if effective_provider == PROVIDER_GOOGLE:
+            result = await self._identify_faces_in_video_google(
+                video_bytes, reference_photos, effective_model, effective_api_key, system_prompt, user_prompt
+            )
+        elif effective_provider == PROVIDER_OPENROUTER:
+            result = await self._identify_faces_in_video_openrouter(
+                video_bytes, reference_photos, effective_model, effective_api_key, system_prompt, user_prompt
+            )
+        else:
+            # Local provider
+            result = await self._identify_faces_in_video_local(
+                video_bytes, reference_photos, system_prompt, user_prompt
+            )
+
+        return result
+
     async def _identify_faces_google(
         self, camera_image: bytes, reference_photos: dict[str, list[bytes]],
         model: str, api_key: str, system_prompt: str, user_prompt: str
@@ -1698,6 +1766,59 @@ class VideoAnalyzer:
         }
 
         result, error = await self._make_ai_request(url, payload, provider_name="Gemini Face Rec")
+        if error:
+            return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
+
+        # Parse Gemini response
+        candidates = result.get("candidates", [])
+        if not candidates:
+            return {"success": True, "faces_detected": 0, "identified_people": [], "summary": "No known faces"}
+
+        response_text = ""
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for p in parts:
+            if "text" in p:
+                response_text += p["text"]
+
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+
+    async def _identify_faces_in_video_google(
+        self, video_bytes: bytes, reference_photos: dict[str, list[bytes]],
+        model: str, api_key: str, system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
+        """Identify faces in VIDEO using Google Gemini."""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+        # Use configured resolution (0 = original, no resize)
+        res = self.facial_recognition_resolution
+        quality = 90  # High quality for cloud providers
+
+        # Build parts array with reference photos and VIDEO
+        parts = []
+
+        # Add reference photos with labels (optionally resized based on config)
+        for person_name, photos in reference_photos.items():
+            parts.append({"text": f"Reference photos of {person_name}:"})
+            for photo in photos:
+                processed = await asyncio.to_thread(self._resize_reference_image, photo, res, quality)
+                photo_b64 = base64.b64encode(processed).decode()
+                parts.append({"inline_data": {"mime_type": "image/jpeg", "data": photo_b64}})
+
+        # Add the VIDEO to analyze (not an image!)
+        parts.append({"text": "\nNow analyze this VIDEO and identify any matching people throughout the entire clip:"})
+        video_b64 = base64.b64encode(video_bytes).decode()
+        parts.append({"inline_data": {"mime_type": "video/mp4", "data": video_b64}})
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "generationConfig": {
+                "temperature": 0.1,  # Low temperature for consistent identification
+                "maxOutputTokens": 100,
+            }
+        }
+
+        result, error = await self._make_ai_request(url, payload, provider_name="Gemini Video Face Rec")
         if error:
             return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
 
@@ -1759,6 +1880,98 @@ class VideoAnalyzer:
             return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
 
         response_text = self._extract_openai_response(result, "OpenRouter")
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+
+    async def _identify_faces_in_video_openrouter(
+        self, video_bytes: bytes, reference_photos: dict[str, list[bytes]],
+        model: str, api_key: str, system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
+        """Identify faces in VIDEO using OpenRouter."""
+        # Use configured resolution (0 = original, no resize)
+        res = self.facial_recognition_resolution
+        quality = 90  # High quality for cloud providers
+
+        # Build content array with reference photos and VIDEO
+        content = []
+
+        # Add reference photos with labels (optionally resized based on config)
+        for person_name, photos in reference_photos.items():
+            content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
+            for photo in photos:
+                processed = await asyncio.to_thread(self._resize_reference_image, photo, res, quality)
+                photo_b64 = base64.b64encode(processed).decode()
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
+
+        # Add the VIDEO to analyze
+        content.append({"type": "text", "text": "\nNow analyze this VIDEO and identify any matching people throughout the entire clip:"})
+        video_b64 = base64.b64encode(video_bytes).decode()
+        content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ],
+            "max_tokens": 100,
+            "temperature": 0.1,
+            "provider": {"only": ["Google Vertex"]}  # Required for base64 video support
+        }
+
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        result, error = await self._make_ai_request(
+            "https://openrouter.ai/api/v1/chat/completions", payload, headers, provider_name="OpenRouter Video Face Rec"
+        )
+
+        if error:
+            return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
+
+        response_text = self._extract_openai_response(result, "OpenRouter")
+        return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
+
+    async def _identify_faces_in_video_local(
+        self, video_bytes: bytes, reference_photos: dict[str, list[bytes]],
+        system_prompt: str, user_prompt: str
+    ) -> dict[str, Any]:
+        """Identify faces in VIDEO using local vLLM endpoint."""
+        # Use configured resolution (0 = original, no resize) - full quality for local
+        res = self.facial_recognition_resolution
+        quality = 90  # High quality matching cloud providers
+
+        # Build content array with reference photos and VIDEO
+        content = []
+
+        # Add reference photos with labels (optionally resized based on config)
+        for person_name, photos in reference_photos.items():
+            content.append({"type": "text", "text": f"Reference photos of {person_name}:"})
+            for photo in photos:
+                processed = await asyncio.to_thread(self._resize_reference_image, photo, res, quality)
+                photo_b64 = base64.b64encode(processed).decode()
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{photo_b64}"}})
+
+        # Add the VIDEO to analyze
+        content.append({"type": "text", "text": "\nNow analyze this VIDEO and identify any matching people throughout the entire clip:"})
+        video_b64 = base64.b64encode(video_bytes).decode()
+        content.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}})
+
+        payload = {
+            "model": self.vllm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ],
+            "max_tokens": 100,
+            "temperature": 0.1,
+        }
+
+        result, error = await self._make_ai_request(
+            f"{self.base_url}/chat/completions", payload, timeout=120, provider_name="Local vLLM Video Face Rec"
+        )
+
+        if error:
+            return {"success": False, "error": error, "faces_detected": 0, "identified_people": [], "summary": ""}
+
+        response_text = self._extract_openai_response(result, "Local vLLM")
         return self._parse_face_recognition_response(response_text, list(reference_photos.keys()))
 
     def _resize_reference_image(self, image_bytes: bytes, max_size: int = 768, quality: int = 90) -> bytes:
