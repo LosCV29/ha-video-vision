@@ -159,10 +159,12 @@ async def async_import_blueprints(hass: HomeAssistant) -> None:
 
 
 # Service schemas
+# NOTE: Don't use default= for duration here! It overrides the configured video_duration.
+# The handler will use analyzer.video_duration when duration is not provided.
 SERVICE_ANALYZE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_CAMERA): cv.string,
-        vol.Optional(ATTR_DURATION, default=3): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
         vol.Optional(ATTR_USER_QUERY, default=""): cv.string,
         vol.Optional(ATTR_FACIAL_RECOGNITION, default=False): cv.boolean,
         # Separate frame position for facial recognition (default 50% = middle of video)
@@ -176,7 +178,8 @@ SERVICE_ANALYZE_SCHEMA = vol.Schema(
 SERVICE_RECORD_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_CAMERA): cv.string,
-        vol.Optional(ATTR_DURATION, default=3): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+        # NOTE: Don't use default= here! Handler uses configured video_duration when not provided.
+        vol.Optional(ATTR_DURATION): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
     }
 )
 
@@ -826,11 +829,16 @@ class VideoAnalyzer:
 
         # Always re-encode for reliability (stream copy can fail on keyframe issues)
         # ultrafast + zerolatency is nearly as fast as copy but more reliable
+        # video_width=0 means native resolution (no scaling)
+        vf_filters = []
         if self.video_fps_percent < 100:
             target_fps = max(8, int(30 * self.video_fps_percent / 100))
-            cmd.extend(["-vf", f"fps={target_fps},scale={self.video_width}:-2"])
-        else:
-            cmd.extend(["-vf", f"scale={self.video_width}:-2"])
+            vf_filters.append(f"fps={target_fps}")
+        if self.video_width > 0:
+            vf_filters.append(f"scale={self.video_width}:-2")
+
+        if vf_filters:
+            cmd.extend(["-vf", ",".join(vf_filters)])
 
         cmd.extend([
             "-c:v", "libx264",
@@ -850,13 +858,13 @@ class VideoAnalyzer:
         if stream_url.startswith("rtsp://"):
             cmd.extend(["-rtsp_transport", "tcp"])
 
-        cmd.extend([
-            "-i", stream_url,
-            "-frames:v", "1",
-            "-vf", f"scale={self.video_width}:-2",
-            "-q:v", self._get_ffmpeg_quality(),
-            output_path
-        ])
+        cmd.extend(["-i", stream_url, "-frames:v", "1"])
+
+        # video_width=0 means native resolution (no scaling)
+        if self.video_width > 0:
+            cmd.extend(["-vf", f"scale={self.video_width}:-2"])
+
+        cmd.extend(["-q:v", self._get_ffmpeg_quality(), output_path])
 
         return cmd
 
@@ -894,9 +902,10 @@ class VideoAnalyzer:
             cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
 
             # Log settings being applied
+            res_str = "native" if self.video_width == 0 else str(self.video_width)
             _LOGGER.info(
-                "Recording clip %s: duration=%ds, resolution=%d, quality=CRF%s",
-                entity_id, duration, self.video_width, self._get_video_crf()
+                "Recording clip %s: duration=%ds, resolution=%s, quality=CRF%s",
+                entity_id, duration, res_str, self._get_video_crf()
             )
 
             proc = await asyncio.create_subprocess_exec(
@@ -987,9 +996,10 @@ class VideoAnalyzer:
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
 
             # Log settings being applied (helps verify config is respected)
+            res_str = "native" if self.video_width == 0 else str(self.video_width)
             _LOGGER.info(
-                "Recording %s: duration=%ds, resolution=%d, quality=CRF%s, fps=%d%%",
-                entity_id, duration, self.video_width, self._get_video_crf(), self.video_fps_percent
+                "Recording %s: duration=%ds, resolution=%s, quality=CRF%s, fps=%d%%",
+                entity_id, duration, res_str, self._get_video_crf(), self.video_fps_percent
             )
 
             # Log the FFmpeg command (mask credentials in URL)
@@ -1156,6 +1166,9 @@ class VideoAnalyzer:
                 "success": False,
                 "error": f"Camera '{camera_input}' not found. Available: {available}"
             }
+
+        # Log camera selection to help debug wrong camera issues
+        _LOGGER.info("Camera lookup: '%s' -> %s", camera_input, entity_id)
 
         # Get stream URL first to determine camera type
         _LOGGER.debug("Getting stream URL for %s", entity_id)
