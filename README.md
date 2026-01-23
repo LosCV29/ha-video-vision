@@ -3,6 +3,7 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE-APACHE)
 
 **True AI video analysis for Home Assistant** - not just snapshots!
 
@@ -402,12 +403,18 @@ See [docs/RING_MQTT_SETUP.md](docs/RING_MQTT_SETUP.md) for complete setup guide.
 
 ## 📄 License
 
-MIT License - See [LICENSE](LICENSE) for details.
+This project uses a dual license:
+
+- **MIT License** - Original contributions by Carlos Munoz. See [LICENSE](LICENSE).
+- **Apache License 2.0** - Code derived from [ha-llmvision](https://github.com/valentinfrlch/ha-llmvision) by Valentin Fröhlich. See [LICENSE-APACHE](LICENSE-APACHE).
+
+See [NOTICE](NOTICE) for full attribution details.
 
 ---
 
 ## 🙏 Credits
 
+- **[ha-llmvision](https://github.com/valentinfrlch/ha-llmvision)** by Valentin Fröhlich - The original project this work is derived from
 - **DeepFace** - Facial recognition engine
 - **Home Assistant** - The best home automation platform
 

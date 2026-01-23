@@ -1,0 +1,17 @@
+HA Video Vision
+Copyright 2025 Carlos Munoz
+
+This project includes code derived from ha-llmvision:
+https://github.com/valentinfrlch/ha-llmvision
+
+ha-llmvision
+Copyright 2024-2026 Valentin Fröhlich
+Licensed under the Apache License, Version 2.0
+
+The original ha-llmvision project provides visual intelligence capabilities
+for Home Assistant using multimodal large language models. This derivative
+work (HA Video Vision) extends and modifies that functionality to support
+native video analysis, facial recognition, and other features.
+
+For the full Apache License 2.0 text, see LICENSE-APACHE in this repository
+or visit: http://www.apache.org/licenses/LICENSE-2.0
