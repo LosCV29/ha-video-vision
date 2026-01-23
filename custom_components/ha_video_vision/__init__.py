@@ -237,7 +237,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_analyze_camera(call: ServiceCall) -> dict[str, Any]:
         """Handle analyze_camera service call."""
         camera = call.data[ATTR_CAMERA]
-        duration = call.data.get(ATTR_DURATION, 3)
+        # Use configured video_duration as default, not hardcoded 3
+        duration = call.data.get(ATTR_DURATION, analyzer.video_duration)
         user_query = call.data.get(ATTR_USER_QUERY, "")
         do_facial_recognition = call.data.get(ATTR_FACIAL_RECOGNITION, False)
         do_remember = call.data.get(ATTR_REMEMBER, False)
@@ -283,7 +284,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_record_clip(call: ServiceCall) -> dict[str, Any]:
         """Handle record_clip service call."""
         camera = call.data[ATTR_CAMERA]
-        duration = call.data.get(ATTR_DURATION, 3)
+        # Use configured video_duration as default, not hardcoded 3
+        duration = call.data.get(ATTR_DURATION, analyzer.video_duration)
 
         return await analyzer.record_clip(camera, duration)
 
@@ -446,6 +448,16 @@ class VideoAnalyzer:
         # Linear mapping: 100 -> 1, 50 -> 31
         ffmpeg_q = max(1, min(31, int((100 - self.snapshot_quality) * 0.6 + 1)))
         return str(ffmpeg_q)
+
+    def _get_video_crf(self) -> str:
+        """Convert snapshot_quality (50-100) to FFmpeg video CRF (28-18).
+
+        FFmpeg CRF: 0 = lossless, 18 = visually lossless, 23 = default, 28 = lower quality
+        Our scale: 50 = CRF 28 (smaller files), 100 = CRF 18 (better quality)
+        """
+        # Linear mapping: 50 -> 28, 100 -> 18
+        crf = max(18, min(28, int(28 - (self.snapshot_quality - 50) * 0.2)))
+        return str(crf)
 
     def _normalize_name(self, name: str) -> str:
         """Normalize a name for comparison (lowercase, remove special chars)."""
@@ -824,7 +836,7 @@ class VideoAnalyzer:
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-tune", "zerolatency",
-            "-crf", "28",
+            "-crf", self._get_video_crf(),  # Use quality setting instead of hardcoded 28
         ])
 
         cmd.extend(["-an", output_path])
@@ -880,6 +892,12 @@ class VideoAnalyzer:
 
             # Simple recording - no FPS probing
             cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
+
+            # Log settings being applied
+            _LOGGER.info(
+                "Recording clip %s: duration=%ds, resolution=%d, quality=CRF%s",
+                entity_id, duration, self.video_width, self._get_video_crf()
+            )
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -967,6 +985,12 @@ class VideoAnalyzer:
 
             # Build and execute ffmpeg recording command - with retry for camera wake-up
             video_cmd = await self._build_ffmpeg_cmd(stream_url, duration, video_path)
+
+            # Log settings being applied (helps verify config is respected)
+            _LOGGER.info(
+                "Recording %s: duration=%ds, resolution=%d, quality=CRF%s, fps=%d%%",
+                entity_id, duration, self.video_width, self._get_video_crf(), self.video_fps_percent
+            )
 
             # Log the FFmpeg command (mask credentials in URL)
             masked_cmd = [re.sub(r'://[^:]+:[^@]+@', '://****:****@', str(c)) for c in video_cmd]
