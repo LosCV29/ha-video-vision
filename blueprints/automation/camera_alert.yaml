@@ -112,21 +112,10 @@ blueprint:
     # Facial Recognition (LLM-based)
     facial_recognition_enabled:
       name: "Enable Facial Recognition"
-      description: "Identify known faces using LLM-based recognition. Store reference photos in the directory configured in integration settings (e.g., /config/camera_faces/PersonName/)."
+      description: "Identify known faces by analyzing the ENTIRE video against reference photos. Store photos in subfolders per person (e.g., /config/camera_faces/PersonName/)."
       default: false
       selector:
         boolean:
-
-    facial_recognition_frame_position:
-      name: "Facial Recognition Frame Position (%)"
-      description: "Which frame to use for facial recognition. SEPARATE from notification image. Use 50% (middle) or higher to capture faces after people have walked closer to the camera."
-      default: 50
-      selector:
-        number:
-          min: 0
-          max: 100
-          step: 10
-          unit_of_measurement: "%"
 
     # Timeline
     save_to_timeline:
@@ -151,7 +140,6 @@ variables:
   delay_seconds: !input capture_delay
   frame_pos: !input frame_position
   face_rec_enabled: !input facial_recognition_enabled
-  face_rec_frame_pos: !input facial_recognition_frame_position
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles whether moving or stationary
   default_prompt: "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. Report ANY people visible - even if small, distant, partially obscured, or at the edges of frame. Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. Ignore parked cars and static structures. Be concise (2-3 sentences)."
@@ -187,14 +175,13 @@ action:
 
   # Analyze camera with prompt - VIDEO ONLY analysis
   # Frame position determines which video frame is used for notification image
-  # Facial recognition uses a separate frame position for better face capture
+  # Facial recognition analyzes the ENTIRE video for better accuracy
   - service: ha_video_vision.analyze_camera
     data:
       camera: !input camera_name
       # Duration omitted - uses integration's configured video_duration for consistent recording length
       user_query: "{{ user_prompt if user_prompt else default_prompt }}"
       facial_recognition: "{{ face_rec_enabled }}"
-      facial_recognition_frame_position: "{{ face_rec_frame_pos }}"
       remember: "{{ timeline_enabled }}"
       frame_position: "{{ frame_pos }}"
     response_variable: result
