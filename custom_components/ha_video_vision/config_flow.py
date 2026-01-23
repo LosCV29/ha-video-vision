@@ -817,6 +817,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_VIDEO_WIDTH, default=str(current.get(CONF_VIDEO_WIDTH) or DEFAULT_VIDEO_WIDTH)): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
+                            {"label": "Native (no scaling - sharpest)", "value": "0"},
                             {"label": "480 (fast, low detail)", "value": "480"},
                             {"label": "640 (SD)", "value": "640"},
                             {"label": "720 (HD)", "value": "720"},
