@@ -1088,6 +1088,23 @@ class VideoAnalyzer:
             _LOGGER.error("Failed to save snapshot: %s", e)
             return None
 
+    async def _save_video_async(self, video_bytes: bytes, safe_name: str) -> str | None:
+        """Save video to disk asynchronously. Returns video path or None.
+
+        Saves the last analyzed video as {camera}_latest.mp4 for verification/debugging.
+        """
+        try:
+            os.makedirs(self.snapshot_dir, exist_ok=True)
+            video_path = os.path.join(self.snapshot_dir, f"{safe_name}_latest.mp4")
+            async with aiofiles.open(video_path, 'wb') as f:
+                await f.write(video_bytes)
+            video_size_kb = len(video_bytes) / 1024
+            _LOGGER.info("Saved video: %s (%.1f KB)", video_path, video_size_kb)
+            return video_path
+        except Exception as e:
+            _LOGGER.error("Failed to save video: %s", e)
+            return None
+
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = "",
         frame_position: int | None = None, facial_recognition_frame_position: int | None = None
@@ -1136,6 +1153,11 @@ class VideoAnalyzer:
         snapshot_path = None
         if video_frame_bytes:
             snapshot_path = await self._save_snapshot_async(video_frame_bytes, safe_name)
+
+        # Save video file for verification/debugging (overwrites previous)
+        video_save_path = None
+        if video_bytes:
+            video_save_path = await self._save_video_async(video_bytes, safe_name)
 
         # Frame for any image-based operations
         frame_bytes = video_frame_bytes
@@ -1190,6 +1212,9 @@ class VideoAnalyzer:
             "animal_detected": animal_detected,
             "snapshot_path": snapshot_path,
             "snapshot_url": f"/media/local/ha_video_vision/{safe_name}_latest.jpg" if snapshot_path else None,
+            # Video saved for verification/debugging
+            "video_path": video_save_path,
+            "video_url": f"/media/local/ha_video_vision/{safe_name}_latest.mp4" if video_save_path else None,
             # Facial recognition frame: always extracted from video (no snapshot fallback)
             "face_rec_snapshot_path": face_rec_snapshot_path,
             "provider_used": provider_used,
