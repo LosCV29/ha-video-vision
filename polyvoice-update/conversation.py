@@ -3233,14 +3233,14 @@ class LMStudioConversationEntity(ConversationEntity):
                 else:
                     # Verbose default prompt for manual camera checks
                     service_data["user_query"] = (
-                        "First, describe the overall scene - what you're looking at (driveway, yard, porch, etc.), "
-                        "the weather/lighting conditions, and general environment. "
-                        "Then provide updates on:\n"
-                        "- PEOPLE: How many, what they look like (clothing, appearance), where they are, what they're doing\n"
-                        "- VEHICLES: Any cars, trucks, or other vehicles - type, color, parked or moving\n"
-                        "- ANIMALS: Any pets or wildlife - what kind, where, what they're doing\n"
-                        "If none are present in a category, briefly note that (e.g., 'No people visible'). "
-                        "Keep it conversational and informative."
+                        "Describe EVERYTHING you see in this camera view in detail. Start with what area this is "
+                        "(backyard, driveway, front porch, etc.) and the lighting/time of day. Then describe all the "
+                        "objects and features you can see: furniture (chairs, tables, hammocks), structures (fences, "
+                        "sheds, gates), decorations (string lights, plants), vehicles (cars, bikes), and the general "
+                        "layout of the space. Be specific about colors, positions (left, right, foreground, background), "
+                        "and conditions. After describing the scene, note if there are any people or animals present - "
+                        "if so, describe them in detail; if not, mention the area appears clear and quiet. "
+                        "Paint a complete picture of what you're seeing."
                     )
 
                 # Call ha_video_vision integration service
