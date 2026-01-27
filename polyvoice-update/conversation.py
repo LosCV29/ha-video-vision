@@ -3230,6 +3230,20 @@ class LMStudioConversationEntity(ConversationEntity):
                 }
                 if query:
                     service_data["user_query"] = query
+                else:
+                    # Verbose default prompt for manual camera checks
+                    service_data["user_query"] = (
+                        "Provide a comprehensive description of EVERYTHING visible in this camera feed. "
+                        "Scan the ENTIRE frame systematically - foreground, middle ground, background, and all edges/corners. "
+                        "Describe in detail:\n"
+                        "1. PEOPLE: Count, appearance (clothing, hair, build), exact location in frame, actions, direction of movement\n"
+                        "2. VEHICLES: Type, color, make/model if identifiable, location, movement (parked, arriving, leaving)\n"
+                        "3. ANIMALS: Species, size, color, location, behavior\n"
+                        "4. ENVIRONMENT: Weather conditions, lighting, time of day indicators, any notable objects or changes\n"
+                        "5. ACTIVITY: What is happening? Any interactions between people/vehicles/objects?\n"
+                        "Be thorough and descriptive. Include spatial relationships (left, right, near, far, foreground, background). "
+                        "Note anything unusual or noteworthy. Aim for a complete picture of the scene."
+                    )
 
                 # Call ha_video_vision integration service
                 result = await self.hass.services.async_call(
