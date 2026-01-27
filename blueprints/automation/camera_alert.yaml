@@ -235,6 +235,7 @@ action:
                         hide-thumbnail: false
                       entity_id: "{{ result.camera }}"
                       push:
+                        category: camera
                         interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                         sound:
                           name: default
