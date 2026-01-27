@@ -87,6 +87,7 @@ from .const import (
     ATTR_FACIAL_RECOGNITION,
     ATTR_REMEMBER,
     ATTR_FRAME_POSITION,
+    ATTR_MAX_TOKENS,
     # Detection Keywords
     PERSON_KEYWORDS,
     ANIMAL_KEYWORDS,
@@ -169,6 +170,8 @@ SERVICE_ANALYZE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_REMEMBER, default=False): cv.boolean,
         # Frame position for notification image (0=first, 50=middle, 100=last)
         vol.Optional(ATTR_FRAME_POSITION): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        # Override max tokens for this analysis (useful for verbose responses)
+        vol.Optional(ATTR_MAX_TOKENS): vol.All(vol.Coerce(int), vol.Range(min=50, max=1000)),
     }
 )
 
@@ -244,9 +247,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         do_remember = call.data.get(ATTR_REMEMBER, False)
         # Frame position for notification (None = use config default)
         frame_position = call.data.get(ATTR_FRAME_POSITION)
+        # Override max tokens for this analysis (None = use config default)
+        max_tokens = call.data.get(ATTR_MAX_TOKENS)
 
         result = await analyzer.analyze_camera(
-            camera, duration, user_query, frame_position
+            camera, duration, user_query, frame_position, max_tokens
         )
 
         # Run LLM-based facial recognition on the ENTIRE VIDEO if enabled
@@ -1114,7 +1119,7 @@ class VideoAnalyzer:
 
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = "",
-        frame_position: int | None = None
+        frame_position: int | None = None, max_tokens: int | None = None
     ) -> dict[str, Any]:
         """Analyze camera using VIDEO and AI vision.
 
@@ -1125,6 +1130,8 @@ class VideoAnalyzer:
             frame_position: Position in video to extract notification frame (0-100%).
                           0 = first frame, 50 = middle, 100 = last frame.
                           None = use configured default.
+            max_tokens: Override max tokens for this analysis.
+                       None = use configured default.
         """
         duration = duration if duration is not None else self.video_duration
 
@@ -1185,7 +1192,7 @@ class VideoAnalyzer:
         # Send video to AI provider for analysis
         # The AI analyzes the entire video - no separate snapshot needed
         description, provider_used = await self._analyze_with_provider(
-            video_bytes, frame_bytes, prompt, entity_id
+            video_bytes, frame_bytes, prompt, entity_id, max_tokens
         )
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
@@ -1297,7 +1304,7 @@ class VideoAnalyzer:
 
     async def _analyze_with_provider(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        entity_id: str = ""
+        entity_id: str = "", max_tokens: int | None = None
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
 
@@ -1306,26 +1313,29 @@ class VideoAnalyzer:
             frame_bytes: Fallback frame for providers that don't support video
             prompt: Analysis prompt
             entity_id: Camera entity ID for context
+            max_tokens: Override max tokens (None = use configured default)
 
         Returns: (description, provider_used)
         """
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
         system_prompt = self._build_system_prompt(entity_id)
+        # Use override if provided, otherwise use configured default
+        tokens = max_tokens if max_tokens is not None else self.vllm_max_tokens
 
         video_size = len(video_bytes) if video_bytes else 0
-        _LOGGER.info("Sending VIDEO to %s: %d bytes (%.1f KB)", effective_provider, video_size, video_size/1024)
+        _LOGGER.info("Sending VIDEO to %s: %d bytes (%.1f KB), max_tokens=%d", effective_provider, video_size, video_size/1024, tokens)
 
         if effective_provider == PROVIDER_GOOGLE:
             result = await self._analyze_google(
-                video_bytes, prompt, effective_model, effective_api_key, system_prompt
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, tokens
             )
         elif effective_provider == PROVIDER_OPENROUTER:
             result = await self._analyze_openrouter(
-                video_bytes, prompt, effective_model, effective_api_key, system_prompt
+                video_bytes, prompt, effective_model, effective_api_key, system_prompt, tokens
             )
         elif effective_provider == PROVIDER_LOCAL:
             result = await self._analyze_local(
-                video_bytes, frame_bytes, prompt, system_prompt
+                video_bytes, frame_bytes, prompt, system_prompt, tokens
             )
         else:
             result = "Unknown provider configured"
@@ -1334,7 +1344,7 @@ class VideoAnalyzer:
 
     async def _analyze_google(
         self, video_bytes: bytes | None, prompt: str,
-        model: str, api_key: str, system_prompt: str
+        model: str, api_key: str, system_prompt: str, max_tokens: int
     ) -> str:
         """Analyze using Google Gemini - VIDEO ONLY."""
         if not video_bytes:
@@ -1351,7 +1361,7 @@ class VideoAnalyzer:
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "generationConfig": {
                 "temperature": self.vllm_temperature,
-                "maxOutputTokens": self.vllm_max_tokens,
+                "maxOutputTokens": max_tokens,
             }
         }
 
@@ -1384,7 +1394,7 @@ class VideoAnalyzer:
 
     async def _analyze_openrouter(
         self, video_bytes: bytes | None, prompt: str,
-        model: str, api_key: str, system_prompt: str
+        model: str, api_key: str, system_prompt: str, max_tokens: int
     ) -> str:
         """Analyze using OpenRouter - VIDEO ONLY."""
         if not video_bytes:
@@ -1407,7 +1417,7 @@ class VideoAnalyzer:
                     {"type": "text", "text": prompt}
                 ]}
             ],
-            "max_tokens": self.vllm_max_tokens,
+            "max_tokens": max_tokens,
             "temperature": self.vllm_temperature,
             "provider": {"only": ["Google Vertex"]}  # Required for base64 video support
         }
@@ -1420,7 +1430,7 @@ class VideoAnalyzer:
 
     async def _analyze_local(
         self, video_bytes: bytes | None, frame_bytes: bytes | None,
-        prompt: str, system_prompt: str
+        prompt: str, system_prompt: str, max_tokens: int
     ) -> str:
         """Analyze using local vLLM endpoint - VIDEO only, no image fallback."""
         if not video_bytes:
@@ -1438,7 +1448,7 @@ class VideoAnalyzer:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content}
             ],
-            "max_tokens": self.vllm_max_tokens,
+            "max_tokens": max_tokens,
             "temperature": self.vllm_temperature,
         }
 

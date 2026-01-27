@@ -135,6 +135,7 @@ ATTR_USER_QUERY: Final = "user_query"
 ATTR_FACIAL_RECOGNITION: Final = "facial_recognition"
 ATTR_REMEMBER: Final = "remember"
 ATTR_FRAME_POSITION: Final = "frame_position"
+ATTR_MAX_TOKENS: Final = "max_tokens"
 
 # =============================================================================
 # DETECTION KEYWORDS (for AI response parsing)

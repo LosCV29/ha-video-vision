@@ -3242,6 +3242,8 @@ class LMStudioConversationEntity(ConversationEntity):
                         "if so, describe them in detail; if not, mention the area appears clear and quiet. "
                         "Paint a complete picture of what you're seeing."
                     )
+                    # Use more tokens for verbose manual checks
+                    service_data["max_tokens"] = 500
 
                 # Call ha_video_vision integration service
                 result = await self.hass.services.async_call(
