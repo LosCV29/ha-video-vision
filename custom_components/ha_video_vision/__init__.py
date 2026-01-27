@@ -801,18 +801,21 @@ class VideoAnalyzer:
         return None
 
     async def _build_ffmpeg_cmd(self, stream_url: str, duration: int, output_path: str) -> list[str]:
-        """Build ffmpeg command with ZERO-latency optimizations - every millisecond counts."""
+        """Build ffmpeg command with keyframe-sync optimizations for clean video start."""
         cmd = ["ffmpeg", "-y"]
 
-        # ZERO LATENCY FLAGS - absolute minimum startup time
+        # KEYFRAME SYNC FLAGS - ensures clean video without grey frames at start
+        # The +nobuffer flag was causing FFmpeg to start mid-stream before receiving
+        # a keyframe, resulting in grey/corrupted frames until P-frames accumulated.
+        # These settings wait for a keyframe while still maintaining low latency.
         cmd.extend([
-            "-fflags", "+nobuffer+discardcorrupt+genpts",  # No buffer, start mid-stream, fix timestamps
-            "-flags", "low_delay",                          # Low latency decoding
-            "-probesize", "4096",                           # 4KB - bare minimum probe
-            "-analyzeduration", "0",                        # Skip analysis - trust the stream
-            "-max_delay", "0",                              # Zero packet delay
-            "-reorder_queue_size", "0",                     # No packet reordering queue
-            "-thread_queue_size", "8",                      # Minimal thread queue
+            "-fflags", "+genpts+discardcorrupt",  # Generate PTS, discard corrupt frames
+            "-flags", "low_delay",                # Low latency decoding after sync
+            "-probesize", "32768",                # 32KB probe - enough to find keyframe
+            "-analyzeduration", "1000000",        # 1 second max to find keyframe
+            "-max_delay", "0",                    # Zero packet delay after sync
+            "-reorder_queue_size", "0",           # No packet reordering queue
+            "-thread_queue_size", "8",            # Minimal thread queue
         ])
 
         if stream_url.startswith("rtsp://"):
@@ -852,8 +855,15 @@ class VideoAnalyzer:
         return cmd
 
     def _build_ffmpeg_frame_cmd(self, stream_url: str, output_path: str) -> list[str]:
-        """Build ffmpeg command to extract a single frame."""
+        """Build ffmpeg command to extract a single frame with keyframe sync."""
         cmd = ["ffmpeg", "-y"]
+
+        # Keyframe sync flags to avoid grabbing a grey/corrupt frame
+        cmd.extend([
+            "-fflags", "+genpts+discardcorrupt",
+            "-probesize", "32768",
+            "-analyzeduration", "1000000",
+        ])
 
         if stream_url.startswith("rtsp://"):
             cmd.extend(["-rtsp_transport", "tcp"])
