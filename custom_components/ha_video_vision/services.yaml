@@ -52,6 +52,15 @@ analyze_camera:
           max: 100
           step: 10
           unit_of_measurement: "%"
+    max_tokens:
+      name: Max Response Tokens
+      description: Override the max tokens for this analysis (useful for verbose responses)
+      required: false
+      selector:
+        number:
+          min: 50
+          max: 1000
+          step: 50
 
 record_clip:
   name: Record Clip
