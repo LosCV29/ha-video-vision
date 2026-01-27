@@ -228,14 +228,11 @@ action:
                       channel: "ha_video_vision"
                       sticky: true
                       style: big_text
-                      # iOS - rich image notification
+                      # iOS - image attachment (matching LLM Vision approach)
                       attachment:
                         url: "{{ result.snapshot_url }}"
-                        content-type: jpeg
-                        hide-thumbnail: false
-                      entity_id: "{{ result.camera }}"
+                        content_type: JPEG
                       push:
-                        category: camera
                         interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                         sound:
                           name: default
