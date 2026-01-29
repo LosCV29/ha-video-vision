@@ -222,38 +222,59 @@ action:
           - repeat:
               for_each: "{{ device_services }}"
               sequence:
-                - service: "notify.{{ repeat.item }}"
-                  data:
-                    title: "{{ notification_title }}"
-                    message: "{{ notification_message }}"
-                    data:
-                      # Attachment - conditionally use video or image
-                      # Image key (used when attachment_type is 'image')
-                      image: "{{ result.snapshot_url if attachment_type == 'image' else '' }}"
-                      # Video key (used when attachment_type is 'video') - Android uses this
-                      video: "{{ result.video_url if attachment_type == 'video' else '' }}"
-                      # Tap actions
-                      url: "{{ tap_nav }}"
-                      clickAction: "{{ tap_nav }}"
-                      # Grouping - no tag means notifications STACK instead of overwrite
-                      group: "ha_video_vision"
-                      # Priority
-                      ttl: 0
-                      priority: high
-                      # Android - bigText style prevents text cutoff
-                      channel: "ha_video_vision"
-                      sticky: true
-                      style: big_text
-                      # iOS - attachment with conditional content type
-                      attachment:
-                        url: "{{ result.video_url if attachment_type == 'video' else result.snapshot_url }}"
-                        content_type: "{{ 'video/mp4' if attachment_type == 'video' else 'image/jpeg' }}"
-                      push:
-                        interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
-                        sound:
-                          name: default
-                          critical: "{{ 1 if critical else 0 }}"
-                          volume: "{{ 1.0 if critical else 0.5 }}"
+                - choose:
+                    # Video notification
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ attachment_type == 'video' }}"
+                      sequence:
+                        - service: "notify.{{ repeat.item }}"
+                          data:
+                            title: "{{ notification_title }}"
+                            message: "{{ notification_message }}"
+                            data:
+                              video: "{{ result.video_url }}"
+                              url: "{{ tap_nav }}"
+                              clickAction: "{{ tap_nav }}"
+                              group: "ha_video_vision"
+                              ttl: 0
+                              priority: high
+                              channel: "ha_video_vision"
+                              sticky: true
+                              attachment:
+                                url: "{{ result.video_url }}"
+                                content-type: video/mp4
+                              push:
+                                interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
+                                sound:
+                                  name: default
+                                  critical: "{{ 1 if critical else 0 }}"
+                                  volume: "{{ 1.0 if critical else 0.5 }}"
+                  # Default: Image notification
+                  default:
+                    - service: "notify.{{ repeat.item }}"
+                      data:
+                        title: "{{ notification_title }}"
+                        message: "{{ notification_message }}"
+                        data:
+                          image: "{{ result.snapshot_url }}"
+                          url: "{{ tap_nav }}"
+                          clickAction: "{{ tap_nav }}"
+                          group: "ha_video_vision"
+                          ttl: 0
+                          priority: high
+                          channel: "ha_video_vision"
+                          sticky: true
+                          style: big_text
+                          attachment:
+                            url: "{{ result.snapshot_url }}"
+                            content-type: image/jpeg
+                          push:
+                            interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
+                            sound:
+                              name: default
+                              critical: "{{ 1 if critical else 0 }}"
+                              volume: "{{ 1.0 if critical else 0.5 }}"
     default:
       - service: system_log.write
         data:
