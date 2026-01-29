@@ -2,7 +2,7 @@ blueprint:
   name: "HA Video Vision - Camera Alert"
   description: >
     When person is detected, record video, run AI analysis,
-    and send mobile notifications with snapshot. Optionally identify
+    and send mobile notifications with snapshot or video clip. Optionally identify
     known faces using LLM-based facial recognition (compares against reference photos).
     Works with iOS and Android via Nabu Casa.
   domain: automation
@@ -100,7 +100,7 @@ blueprint:
 
     frame_position:
       name: "Notification Frame Position (%)"
-      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame."
+      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame. Only applies when attachment type is 'Still Image'."
       default: 50
       selector:
         number:
@@ -108,6 +108,18 @@ blueprint:
           max: 100
           step: 10
           unit_of_measurement: "%"
+
+    notification_attachment:
+      name: "Notification Attachment"
+      description: "Choose what to attach to the notification. Still Image is faster and smaller. Video Clip shows the full recorded motion (iOS plays inline, Android downloads)."
+      default: "image"
+      selector:
+        select:
+          options:
+            - label: "Still Image"
+              value: "image"
+            - label: "Video Clip"
+              value: "video"
 
     # Facial Recognition (LLM-based)
     facial_recognition_enabled:
@@ -139,6 +151,7 @@ variables:
   time_end: !input notify_end
   delay_seconds: !input capture_delay
   frame_pos: !input frame_position
+  attachment_type: !input notification_attachment
   face_rec_enabled: !input facial_recognition_enabled
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles whether moving or stationary
@@ -214,8 +227,11 @@ action:
                     title: "{{ notification_title }}"
                     message: "{{ notification_message }}"
                     data:
-                      # Image - works for both platforms
-                      image: "{{ result.snapshot_url }}"
+                      # Attachment - conditionally use video or image
+                      # Image key (used when attachment_type is 'image')
+                      image: "{{ result.snapshot_url if attachment_type == 'image' else '' }}"
+                      # Video key (used when attachment_type is 'video') - Android uses this
+                      video: "{{ result.video_url if attachment_type == 'video' else '' }}"
                       # Tap actions
                       url: "{{ tap_nav }}"
                       clickAction: "{{ tap_nav }}"
@@ -228,10 +244,10 @@ action:
                       channel: "ha_video_vision"
                       sticky: true
                       style: big_text
-                      # iOS - image attachment (matching LLM Vision approach)
+                      # iOS - attachment with conditional content type
                       attachment:
-                        url: "{{ result.snapshot_url }}"
-                        content_type: JPEG
+                        url: "{{ result.video_url if attachment_type == 'video' else result.snapshot_url }}"
+                        content_type: "{{ 'video/mp4' if attachment_type == 'video' else 'image/jpeg' }}"
                       push:
                         interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                         sound:
