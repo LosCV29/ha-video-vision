@@ -75,9 +75,11 @@ from .const import (
     CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_DIRECTORY,
     CONF_FACIAL_RECOGNITION_RESOLUTION,
+    CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
     DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
     DEFAULT_FACIAL_RECOGNITION_RESOLUTION,
+    DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     # Timeline
     CONF_TIMELINE_ENABLED,
     # Attributes
@@ -425,6 +427,7 @@ class VideoAnalyzer:
         self.facial_recognition_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
         self.facial_recognition_directory = config.get(CONF_FACIAL_RECOGNITION_DIRECTORY, DEFAULT_FACIAL_RECOGNITION_DIRECTORY)
         self.facial_recognition_resolution = int(config.get(CONF_FACIAL_RECOGNITION_RESOLUTION, DEFAULT_FACIAL_RECOGNITION_RESOLUTION))
+        self.facial_recognition_confidence_threshold = int(config.get(CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD))
 
         _LOGGER.info(
             "HA Video Vision config - Provider: %s, Cameras: %d, Resolution: %dp, FPS: %d%%",
@@ -1658,20 +1661,35 @@ class VideoAnalyzer:
         # Build prompt parts with reference photos
         people_names = list(reference_photos.keys())
 
-        # System prompt for facial recognition
+        # System prompt for facial recognition - strict matching to prevent false positives
         system_prompt = (
-            "You are a facial recognition assistant. You will be shown reference photos of known people, "
-            "followed by a camera image. Your task is to identify if any person in the camera image "
-            "matches any of the known people from the reference photos.\n\n"
-            "IMPORTANT RULES:\n"
-            "1. Compare facial features carefully: face shape, eyes, nose, mouth, hair, skin tone\n"
-            "2. Only identify someone if you are reasonably confident (40%+ certainty)\n"
-            "3. Consider lighting, angle, and image quality differences\n"
-            "4. If you cannot see faces clearly or no one matches, say 'No known faces'\n\n"
+            "You are a STRICT facial recognition assistant. You will be shown reference photos of known people, "
+            "followed by a camera image. Your task is to identify ONLY if you are highly confident that a person "
+            "in the camera image matches someone from the reference photos.\n\n"
+            "CRITICAL MATCHING RULES - BE VERY STRICT:\n"
+            "1. You must match AT LEAST 4-5 of these features to identify someone:\n"
+            "   - Face shape (oval, round, square, heart, oblong)\n"
+            "   - Eye shape, spacing, and color\n"
+            "   - Nose shape and size\n"
+            "   - Mouth shape and lip thickness\n"
+            "   - Jawline and chin shape\n"
+            "   - Eyebrow shape and thickness\n"
+            "   - Ear shape (if visible)\n"
+            "   - Skin tone\n"
+            "2. Hair style/color ALONE is NOT sufficient - people can have similar hair\n"
+            "3. Body type/clothing ALONE is NOT sufficient - focus on FACIAL features only\n"
+            "4. If the face is partially obscured, at an extreme angle, or too small, say 'No known faces'\n"
+            "5. When in doubt, say 'No known faces' - FALSE POSITIVES ARE WORSE THAN MISSED DETECTIONS\n"
+            "6. A stranger should NEVER be misidentified as a known person\n\n"
+            "CONFIDENCE GUIDELINES:\n"
+            "- 90-100%: Multiple distinguishing facial features match clearly\n"
+            "- 80-89%: Most facial features match, minor uncertainty due to angle/lighting\n"
+            "- 70-79%: Several features match but some uncertainty\n"
+            "- Below 70%: Too uncertain - respond 'No known faces' instead\n\n"
             "RESPONSE FORMAT (strictly follow this):\n"
             "- If you identify someone: 'PersonName XX%' where XX is your confidence (0-100)\n"
             "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
-            "- If no match or no faces visible: 'No known faces'\n\n"
+            "- If no match, uncertain, or faces not clear: 'No known faces'\n\n"
             "Only respond with the identification result, nothing else."
         )
 
@@ -1708,22 +1726,37 @@ class VideoAnalyzer:
         # Build prompt parts with reference photos
         people_names = list(reference_photos.keys())
 
-        # System prompt for video-based facial recognition
+        # System prompt for video-based facial recognition - strict matching to prevent false positives
         system_prompt = (
-            "You are a facial recognition assistant. You will be shown reference photos of known people, "
-            "followed by a VIDEO from a security camera. Your task is to identify if any person visible "
-            "ANYWHERE in the video matches any of the known people from the reference photos.\n\n"
-            "IMPORTANT RULES:\n"
-            "1. Carefully examine the ENTIRE video - faces may appear at any moment\n"
-            "2. Compare facial features: face shape, eyes, nose, mouth, hair, skin tone\n"
-            "3. Only identify someone if you are reasonably confident (40%+ certainty)\n"
-            "4. Consider lighting, angle, distance, and motion blur\n"
-            "5. Look at the person from multiple angles as they move through the video\n"
-            "6. If you cannot see faces clearly or no one matches, say 'No known faces'\n\n"
+            "You are a STRICT facial recognition assistant. You will be shown reference photos of known people, "
+            "followed by a VIDEO from a security camera. Your task is to identify ONLY if you are highly confident "
+            "that a person visible in the video matches someone from the reference photos.\n\n"
+            "CRITICAL MATCHING RULES - BE VERY STRICT:\n"
+            "1. Carefully examine the ENTIRE video for clear facial views\n"
+            "2. You must match AT LEAST 4-5 of these features to identify someone:\n"
+            "   - Face shape (oval, round, square, heart, oblong)\n"
+            "   - Eye shape, spacing, and color\n"
+            "   - Nose shape and size\n"
+            "   - Mouth shape and lip thickness\n"
+            "   - Jawline and chin shape\n"
+            "   - Eyebrow shape and thickness\n"
+            "   - Ear shape (if visible)\n"
+            "   - Skin tone\n"
+            "3. Hair style/color ALONE is NOT sufficient - people can have similar hair\n"
+            "4. Body type/clothing/gait ALONE is NOT sufficient - focus on FACIAL features only\n"
+            "5. Use multiple frames/angles to verify, but require clear facial features\n"
+            "6. If faces are too small, blurry, or at extreme angles, say 'No known faces'\n"
+            "7. When in doubt, say 'No known faces' - FALSE POSITIVES ARE WORSE THAN MISSED DETECTIONS\n"
+            "8. A stranger should NEVER be misidentified as a known person\n\n"
+            "CONFIDENCE GUIDELINES:\n"
+            "- 90-100%: Multiple distinguishing facial features match clearly across frames\n"
+            "- 80-89%: Most facial features match, minor uncertainty due to angle/lighting/motion\n"
+            "- 70-79%: Several features match but some uncertainty\n"
+            "- Below 70%: Too uncertain - respond 'No known faces' instead\n\n"
             "RESPONSE FORMAT (strictly follow this):\n"
             "- If you identify someone: 'PersonName XX%' where XX is your confidence (0-100)\n"
             "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
-            "- If no match or no faces visible: 'No known faces'\n\n"
+            "- If no match, uncertain, or faces not clear: 'No known faces'\n\n"
             "Only respond with the identification result, nothing else."
         )
 
@@ -2079,9 +2112,11 @@ class VideoAnalyzer:
         """Parse LLM response to extract identified people and confidence.
 
         Expected format: "PersonName XX%" or "PersonName1 XX%, PersonName2 YY%"
+        Filters results by the configured confidence threshold to prevent false positives.
         """
         response_text = response_text.strip()
-        _LOGGER.debug("Face rec response: %s", response_text)
+        threshold = self.facial_recognition_confidence_threshold
+        _LOGGER.debug("Face rec response: %s (threshold: %d%%)", response_text, threshold)
 
         # Check for "no faces" type responses
         no_face_phrases = ["no known faces", "no faces", "no match", "cannot identify", "unable to identify"]
@@ -2094,6 +2129,7 @@ class VideoAnalyzer:
             }
 
         identified_people = []
+        filtered_out = []  # Track filtered matches for logging
 
         # Parse "Name XX%" patterns
         # Match patterns like "Carlos 65%", "Carlos: 65%", "Carlos (65%)"
@@ -2109,10 +2145,23 @@ class VideoAnalyzer:
                     break
 
             if matched_name:
-                identified_people.append({
-                    "name": matched_name,
-                    "confidence": int(confidence),
-                })
+                conf_value = int(confidence)
+                # Filter by confidence threshold to prevent false positives
+                if conf_value >= threshold:
+                    identified_people.append({
+                        "name": matched_name,
+                        "confidence": conf_value,
+                    })
+                else:
+                    # Track filtered matches for debugging false positive prevention
+                    filtered_out.append(f"{matched_name} {conf_value}%")
+
+        # Log filtered matches for debugging
+        if filtered_out:
+            _LOGGER.info(
+                "Face rec filtered out %d low-confidence match(es) below %d%% threshold: %s",
+                len(filtered_out), threshold, ", ".join(filtered_out)
+            )
 
         # Build summary in "Name XX%" format
         if identified_people:
