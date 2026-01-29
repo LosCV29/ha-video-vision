@@ -233,6 +233,8 @@ action:
                             title: "{{ notification_title }}"
                             message: "{{ notification_message }}"
                             data:
+                              # Android: image as fallback (video support is limited), video for inline playback
+                              image: "{{ result.snapshot_url }}"
                               video: "{{ result.video_url }}"
                               url: "{{ tap_nav }}"
                               clickAction: "{{ tap_nav }}"
@@ -241,9 +243,10 @@ action:
                               priority: high
                               channel: "ha_video_vision"
                               sticky: true
+                              # iOS: attachment block for video
                               attachment:
                                 url: "{{ result.video_url }}"
-                                content-type: video/mp4
+                                content_type: MPEG
                               push:
                                 interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                                 sound:
@@ -268,7 +271,7 @@ action:
                           style: big_text
                           attachment:
                             url: "{{ result.snapshot_url }}"
-                            content-type: image/jpeg
+                            content_type: JPEG
                           push:
                             interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                             sound:
