@@ -233,9 +233,10 @@ action:
                             title: "{{ notification_title }}"
                             message: "{{ notification_message }}"
                             data:
-                              # Android: image as fallback (video support is limited), video for inline playback
-                              image: "{{ result.snapshot_url }}"
+                              # Video attachment - works on both platforms when properly encoded with faststart
                               video: "{{ result.video_url }}"
+                              # Image fallback for Android (in case video doesn't render)
+                              image: "{{ result.snapshot_url }}"
                               url: "{{ tap_nav }}"
                               clickAction: "{{ tap_nav }}"
                               group: "ha_video_vision"
@@ -243,10 +244,11 @@ action:
                               priority: high
                               channel: "ha_video_vision"
                               sticky: true
-                              # iOS: attachment block for video
+                              # iOS: attachment block with content-type
                               attachment:
                                 url: "{{ result.video_url }}"
-                                content_type: MPEG
+                                content-type: mp4
+                                hide-thumbnail: false
                               push:
                                 interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                                 sound:
@@ -271,7 +273,7 @@ action:
                           style: big_text
                           attachment:
                             url: "{{ result.snapshot_url }}"
-                            content_type: JPEG
+                            content-type: jpeg
                           push:
                             interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
                             sound:

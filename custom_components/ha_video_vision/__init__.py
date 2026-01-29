@@ -848,6 +848,9 @@ class VideoAnalyzer:
             "-preset", "ultrafast",
             "-tune", "zerolatency",
             "-crf", self._get_video_crf(),  # Use quality setting instead of hardcoded 28
+            # CRITICAL for mobile notifications: move moov atom to start of file
+            # Without this, Android returns "Found 0 frames" and can't parse video metadata
+            "-movflags", "+faststart",
         ])
 
         cmd.extend(["-an", output_path])
