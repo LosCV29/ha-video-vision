@@ -104,11 +104,15 @@ DEFAULT_SNAPSHOT_QUALITY: Final = 85  # JPEG quality 1-100
 CONF_FACIAL_RECOGNITION_ENABLED: Final = "facial_recognition_enabled"
 CONF_FACIAL_RECOGNITION_DIRECTORY: Final = "facial_recognition_directory"
 CONF_FACIAL_RECOGNITION_RESOLUTION: Final = "facial_recognition_resolution"
+CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD: Final = "facial_recognition_confidence_threshold"
 
 DEFAULT_FACIAL_RECOGNITION_ENABLED: Final = False
 DEFAULT_FACIAL_RECOGNITION_DIRECTORY: Final = "/config/camera_faces"  # Directory with subfolders per person
 # Resolution for reference photos (0 = original/no resize, higher = sharper but more tokens)
 DEFAULT_FACIAL_RECOGNITION_RESOLUTION: Final = 768  # Good balance of quality and token usage
+# Minimum confidence threshold for facial recognition matches (0-100)
+# Higher values reduce false positives but may miss some true positives
+DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD: Final = 85
 
 # =============================================================================
 # TIMELINE (Calendar-based event history)

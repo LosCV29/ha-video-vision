@@ -61,9 +61,11 @@ from .const import (
     CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_DIRECTORY,
     CONF_FACIAL_RECOGNITION_RESOLUTION,
+    CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
     DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
     DEFAULT_FACIAL_RECOGNITION_RESOLUTION,
+    DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     # Timeline
     CONF_TIMELINE_ENABLED,
     CONF_TIMELINE_RETENTION_DAYS,
@@ -916,8 +918,20 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
+                vol.Required(
+                    CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
+                    default=current.get(CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=50, max=99, step=1,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.SLIDER
+                    )
+                ),
             }),
-            description_placeholders={},
+            description_placeholders={
+                "threshold_hint": "Higher values reduce false positives. 85%+ recommended for strict matching.",
+            },
         )
 
     async def async_step_timeline(
