@@ -2,7 +2,7 @@ blueprint:
   name: "HA Video Vision - Camera Alert"
   description: >
     When person is detected, record video, run AI analysis,
-    and send mobile notifications with snapshot or video clip. Optionally identify
+    and send mobile notifications with snapshot. Optionally identify
     known faces using LLM-based facial recognition (compares against reference photos).
     Works with iOS and Android via Nabu Casa.
   domain: automation
@@ -100,7 +100,7 @@ blueprint:
 
     frame_position:
       name: "Notification Frame Position (%)"
-      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame. Only applies when attachment type is 'Still Image'."
+      description: "Which frame from the video to use for the notification image. 0% = first frame, 50% = middle, 100% = last frame."
       default: 50
       selector:
         number:
@@ -108,18 +108,6 @@ blueprint:
           max: 100
           step: 10
           unit_of_measurement: "%"
-
-    notification_attachment:
-      name: "Notification Attachment"
-      description: "Choose what to attach to the notification. Still Image is faster and smaller. Video Clip shows the full recorded motion (iOS plays inline, Android downloads)."
-      default: "image"
-      selector:
-        select:
-          options:
-            - label: "Still Image"
-              value: "image"
-            - label: "Video Clip"
-              value: "video"
 
     # Facial Recognition (LLM-based)
     facial_recognition_enabled:
@@ -151,7 +139,6 @@ variables:
   time_end: !input notify_end
   delay_seconds: !input capture_delay
   frame_pos: !input frame_position
-  attachment_type: !input notification_attachment
   face_rec_enabled: !input facial_recognition_enabled
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles whether moving or stationary
@@ -222,64 +209,35 @@ action:
           - repeat:
               for_each: "{{ device_services }}"
               sequence:
-                - choose:
-                    # Video notification
-                    - conditions:
-                        - condition: template
-                          value_template: "{{ attachment_type == 'video' }}"
-                      sequence:
-                        - service: "notify.{{ repeat.item }}"
-                          data:
-                            title: "{{ notification_title }}"
-                            message: "{{ notification_message }}"
-                            data:
-                              # Video attachment - works on both platforms when properly encoded with faststart
-                              video: "{{ result.video_url }}"
-                              # Image fallback for Android (in case video doesn't render)
-                              image: "{{ result.snapshot_url }}"
-                              url: "{{ tap_nav }}"
-                              clickAction: "{{ tap_nav }}"
-                              group: "ha_video_vision"
-                              ttl: 0
-                              priority: high
-                              channel: "ha_video_vision"
-                              sticky: true
-                              # iOS: attachment block with content-type
-                              attachment:
-                                url: "{{ result.video_url }}"
-                                content-type: mp4
-                                hide-thumbnail: false
-                              push:
-                                interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
-                                sound:
-                                  name: default
-                                  critical: "{{ 1 if critical else 0 }}"
-                                  volume: "{{ 1.0 if critical else 0.5 }}"
-                  # Default: Image notification
-                  default:
-                    - service: "notify.{{ repeat.item }}"
-                      data:
-                        title: "{{ notification_title }}"
-                        message: "{{ notification_message }}"
-                        data:
-                          image: "{{ result.snapshot_url }}"
-                          url: "{{ tap_nav }}"
-                          clickAction: "{{ tap_nav }}"
-                          group: "ha_video_vision"
-                          ttl: 0
-                          priority: high
-                          channel: "ha_video_vision"
-                          sticky: true
-                          style: big_text
-                          attachment:
-                            url: "{{ result.snapshot_url }}"
-                            content-type: jpeg
-                          push:
-                            interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
-                            sound:
-                              name: default
-                              critical: "{{ 1 if critical else 0 }}"
-                              volume: "{{ 1.0 if critical else 0.5 }}"
+                - service: "notify.{{ repeat.item }}"
+                  data:
+                    title: "{{ notification_title }}"
+                    message: "{{ notification_message }}"
+                    data:
+                      # Image - works for both platforms
+                      image: "{{ result.snapshot_url }}"
+                      # Tap actions
+                      url: "{{ tap_nav }}"
+                      clickAction: "{{ tap_nav }}"
+                      # Grouping - no tag means notifications STACK instead of overwrite
+                      group: "ha_video_vision"
+                      # Priority
+                      ttl: 0
+                      priority: high
+                      # Android - bigText style prevents text cutoff
+                      channel: "ha_video_vision"
+                      sticky: true
+                      style: big_text
+                      # iOS - image attachment (matching LLM Vision approach)
+                      attachment:
+                        url: "{{ result.snapshot_url }}"
+                        content_type: JPEG
+                      push:
+                        interruption-level: "{{ 'critical' if critical else 'time-sensitive' }}"
+                        sound:
+                          name: default
+                          critical: "{{ 1 if critical else 0 }}"
+                          volume: "{{ 1.0 if critical else 0.5 }}"
     default:
       - service: system_log.write
         data:
