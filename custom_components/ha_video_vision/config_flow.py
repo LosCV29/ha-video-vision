@@ -930,7 +930,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 ),
             }),
             description_placeholders={
-                "threshold_hint": "70% recommended for balanced detection. Increase to 80%+ if getting false positives.",
+                "threshold_hint": "60% recommended. Lower if missing people, raise to 70%+ if getting false positives.",
             },
         )
 

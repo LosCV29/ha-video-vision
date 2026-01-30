@@ -111,8 +111,8 @@ DEFAULT_FACIAL_RECOGNITION_DIRECTORY: Final = "/config/camera_faces"  # Director
 # Resolution for reference photos (0 = original/no resize, higher = sharper but more tokens)
 DEFAULT_FACIAL_RECOGNITION_RESOLUTION: Final = 768  # Good balance of quality and token usage
 # Minimum confidence threshold for facial recognition matches (0-100)
-# This should match the prompt guidelines (70%+ is considered a valid match)
-DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD: Final = 70
+# LLM reports all confidence levels, threshold controls what gets shown to user
+DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD: Final = 60
 
 # =============================================================================
 # TIMELINE (Calendar-based event history)
