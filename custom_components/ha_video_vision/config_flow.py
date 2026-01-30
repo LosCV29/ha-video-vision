@@ -930,7 +930,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 ),
             }),
             description_placeholders={
-                "threshold_hint": "Higher values reduce false positives. 85%+ recommended for strict matching.",
+                "threshold_hint": "70% recommended for balanced detection. Increase to 80%+ if getting false positives.",
             },
         )
 
