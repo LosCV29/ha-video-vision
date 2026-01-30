@@ -1483,13 +1483,22 @@ class VideoAnalyzer:
                 continue
 
             person_name = person_dir.name
+            # Get all files in directory
+            all_files = list(person_dir.iterdir())
+            # Filter to valid image extensions
             image_files = sorted([
-                f for f in person_dir.iterdir()
-                if f.suffix.lower() in image_extensions
+                f for f in all_files
+                if f.is_file() and f.suffix.lower() in image_extensions
             ])[:max_photos]
 
             if image_files:
                 result[person_name] = image_files
+            else:
+                # Log when directory exists but has no valid images
+                _LOGGER.warning(
+                    "Facial recognition: '%s' directory has no valid images (found %d files, need .jpg/.jpeg/.png/.webp)",
+                    person_name, len([f for f in all_files if f.is_file()])
+                )
 
         return result
 
@@ -1523,12 +1532,22 @@ class VideoAnalyzer:
                         async with aiofiles.open(img_path, 'rb') as f:
                             photo_bytes = await f.read()
                             photos.append(photo_bytes)
+                            _LOGGER.debug("Loaded reference photo: %s", img_path)
                     except Exception as e:
-                        _LOGGER.debug("Failed to load reference photo %s: %s", img_path, e)
+                        _LOGGER.warning("Failed to load reference photo %s: %s", img_path, e)
 
                 if photos:
                     reference_photos[person_name] = photos
-                    _LOGGER.debug("Loaded %d reference photos for %s", len(photos), person_name)
+                    _LOGGER.info("Facial recognition: loaded %d photo(s) for '%s'", len(photos), person_name)
+                else:
+                    _LOGGER.warning("Facial recognition: directory '%s' exists but no photos could be loaded!", person_name)
+
+            # Summary log
+            if reference_photos:
+                _LOGGER.info("Facial recognition ready: %d people configured: %s",
+                            len(reference_photos), list(reference_photos.keys()))
+            else:
+                _LOGGER.warning("Facial recognition: no reference photos loaded from %s", faces_dir)
 
         except Exception as e:
             _LOGGER.error("Error loading reference photos: %s", e)
