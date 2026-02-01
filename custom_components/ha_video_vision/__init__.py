@@ -1685,21 +1685,32 @@ class VideoAnalyzer:
             "You are a facial recognition assistant. You will be shown reference photos of known people, "
             "followed by a camera image. Your task is to identify if a person in the camera image matches "
             "someone from the reference photos.\n\n"
-            "MATCHING GUIDELINES:\n"
+            "FACE QUALITY REQUIREMENTS - CRITICAL:\n"
+            "You can ONLY attempt identification if the face meets ALL of these criteria:\n"
+            "1. The face must be CLOSE ENOUGH to see clear facial features (not a distant figure)\n"
+            "2. You must be able to clearly see at least the eyes and nose\n"
+            "3. The face should take up a reasonable portion of the frame (not a tiny dot)\n"
+            "4. If someone is across the street, far in the background, or their face is smaller than "
+            "roughly 1/20th of the image, DO NOT attempt identification\n\n"
+            "If the face is too small, too distant, or too blurry to see clear facial features, "
+            "respond with 'Face too distant' or 'Face not clear enough' - do NOT guess.\n\n"
+            "MATCHING GUIDELINES (only if face is clear enough):\n"
             "1. Compare facial features between reference photos and the camera image:\n"
             "   - Face shape, eye shape/spacing, nose shape, mouth/lips\n"
             "   - Jawline, eyebrows, skin tone\n"
             "2. Hair and clothing can help confirm identity but shouldn't be the only factor\n"
             "3. Account for differences in lighting, angle, and expression\n"
-            "4. If the face is clearly visible, make your best assessment\n\n"
-            "CRITICAL RULE - YOU MUST FOLLOW THIS:\n"
-            "If you see ANY face in the image, you MUST compare it to ALL reference photos and give "
-            "your best confidence estimate for each possible match. Even if you're only 20% sure, "
-            "report it as 'PersonName 20%'. The system will filter based on threshold.\n\n"
+            "4. Base confidence ONLY on facial feature comparison, not body shape or clothing\n\n"
+            "CONFIDENCE GUIDELINES:\n"
+            "- 80%+ confidence: Face is clearly visible AND features strongly match\n"
+            "- 60-79% confidence: Face is visible AND features mostly match\n"
+            "- Below 60%: Only if you can see the face but aren't certain of the match\n"
+            "- NEVER give high confidence for distant or unclear faces\n\n"
             "RESPONSE FORMAT:\n"
-            "- For EVERY face you see, report: 'PersonName XX%' with your best confidence estimate\n"
+            "- If face is clear enough: 'PersonName XX%' with your confidence estimate\n"
             "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
-            "- ONLY say 'No known faces' if there is literally NO human face visible in the image\n\n"
+            "- If face is too distant/small/blurry: 'Face too distant' or 'Face not clear enough'\n"
+            "- If no human face visible: 'No known faces'\n\n"
             "Only respond with the identification result, nothing else."
         )
 
@@ -1741,22 +1752,33 @@ class VideoAnalyzer:
             "You are a facial recognition assistant. You will be shown reference photos of known people, "
             "followed by a VIDEO from a security camera. Your task is to identify if a person visible "
             "in the video matches someone from the reference photos.\n\n"
-            "MATCHING GUIDELINES:\n"
+            "FACE QUALITY REQUIREMENTS - CRITICAL:\n"
+            "You can ONLY attempt identification if the face meets ALL of these criteria:\n"
+            "1. The face must be CLOSE ENOUGH to see clear facial features (not a distant figure)\n"
+            "2. You must be able to clearly see at least the eyes and nose in at least one frame\n"
+            "3. The face should take up a reasonable portion of the frame (not a tiny dot)\n"
+            "4. If someone is across the street, far in the background, or their face is smaller than "
+            "roughly 1/20th of the frame, DO NOT attempt identification\n\n"
+            "If the face is too small, too distant, or too blurry to see clear facial features, "
+            "respond with 'Face too distant' or 'Face not clear enough' - do NOT guess.\n\n"
+            "MATCHING GUIDELINES (only if face is clear enough):\n"
             "1. Examine the video for clear facial views - use multiple frames for better accuracy\n"
             "2. Compare facial features between reference photos and people in the video:\n"
             "   - Face shape, eye shape/spacing, nose shape, mouth/lips\n"
             "   - Jawline, eyebrows, skin tone\n"
             "3. Hair, clothing, and body type can help confirm identity but shouldn't be the only factor\n"
             "4. Account for differences in lighting, angle, expression, and motion blur\n"
-            "5. If a face is clearly visible at any point in the video, make your best assessment\n\n"
-            "CRITICAL RULE - YOU MUST FOLLOW THIS:\n"
-            "If you see ANY face in the video, you MUST compare it to ALL reference photos and give "
-            "your best confidence estimate for each possible match. Even if you're only 20% sure, "
-            "report it as 'PersonName 20%'. The system will filter based on threshold.\n\n"
+            "5. Base confidence ONLY on facial feature comparison, not body shape or clothing\n\n"
+            "CONFIDENCE GUIDELINES:\n"
+            "- 80%+ confidence: Face is clearly visible in multiple frames AND features strongly match\n"
+            "- 60-79% confidence: Face is visible AND features mostly match\n"
+            "- Below 60%: Only if you can see the face but aren't certain of the match\n"
+            "- NEVER give high confidence for distant or unclear faces\n\n"
             "RESPONSE FORMAT:\n"
-            "- For EVERY face you see, report: 'PersonName XX%' with your best confidence estimate\n"
+            "- If face is clear enough: 'PersonName XX%' with your confidence estimate\n"
             "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
-            "- ONLY say 'No known faces' if there is literally NO human face visible in the video\n\n"
+            "- If face is too distant/small/blurry: 'Face too distant' or 'Face not clear enough'\n"
+            "- If no human face visible: 'No known faces'\n\n"
             "Only respond with the identification result, nothing else."
         )
 
@@ -2118,14 +2140,26 @@ class VideoAnalyzer:
         threshold = self.facial_recognition_confidence_threshold
         _LOGGER.debug("Face rec response: %s (threshold: %d%%)", response_text, threshold)
 
-        # Check for "no faces" type responses
+        # Check for "no faces" type responses (including face quality issues)
         no_face_phrases = ["no known faces", "no faces", "no match", "cannot identify", "unable to identify"]
+        face_quality_phrases = ["face too distant", "face not clear", "too small", "too far", "too blurry"]
+
         if any(phrase in response_text.lower() for phrase in no_face_phrases):
             return {
                 "success": True,
                 "faces_detected": 0,
                 "identified_people": [],
                 "summary": "No known faces",
+            }
+
+        # Handle face quality issues - face detected but not clear enough to identify
+        if any(phrase in response_text.lower() for phrase in face_quality_phrases):
+            _LOGGER.info("Face rec: Face detected but not clear enough for identification: %s", response_text)
+            return {
+                "success": True,
+                "faces_detected": 0,
+                "identified_people": [],
+                "summary": "Face not clear enough",
             }
 
         identified_people = []
