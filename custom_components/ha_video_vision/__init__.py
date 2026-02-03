@@ -75,10 +75,12 @@ from .const import (
     CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_DIRECTORY,
     CONF_FACIAL_RECOGNITION_RESOLUTION,
+    CONF_FACIAL_RECOGNITION_QUALITY,
     CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
     DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
     DEFAULT_FACIAL_RECOGNITION_RESOLUTION,
+    DEFAULT_FACIAL_RECOGNITION_QUALITY,
     DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     # Timeline
     CONF_TIMELINE_ENABLED,
@@ -427,6 +429,7 @@ class VideoAnalyzer:
         self.facial_recognition_enabled = config.get(CONF_FACIAL_RECOGNITION_ENABLED, DEFAULT_FACIAL_RECOGNITION_ENABLED)
         self.facial_recognition_directory = config.get(CONF_FACIAL_RECOGNITION_DIRECTORY, DEFAULT_FACIAL_RECOGNITION_DIRECTORY)
         self.facial_recognition_resolution = int(config.get(CONF_FACIAL_RECOGNITION_RESOLUTION, DEFAULT_FACIAL_RECOGNITION_RESOLUTION))
+        self.facial_recognition_quality = int(config.get(CONF_FACIAL_RECOGNITION_QUALITY, DEFAULT_FACIAL_RECOGNITION_QUALITY))
         self.facial_recognition_confidence_threshold = int(config.get(CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD, DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD))
 
         _LOGGER.info(
@@ -1680,38 +1683,15 @@ class VideoAnalyzer:
         # Build prompt parts with reference photos
         people_names = list(reference_photos.keys())
 
-        # System prompt for facial recognition - balanced for accuracy
+        # System prompt for facial recognition - token optimized
         system_prompt = (
-            "You are a facial recognition assistant. You will be shown reference photos of known people, "
-            "followed by a camera image. Your task is to identify if a person in the camera image matches "
-            "someone from the reference photos.\n\n"
-            "FACE QUALITY REQUIREMENTS - CRITICAL:\n"
-            "You can ONLY attempt identification if the face meets ALL of these criteria:\n"
-            "1. The face must be CLOSE ENOUGH to see clear facial features (not a distant figure)\n"
-            "2. You must be able to clearly see at least the eyes and nose\n"
-            "3. The face should take up a reasonable portion of the frame (not a tiny dot)\n"
-            "4. If someone is across the street, far in the background, or their face is smaller than "
-            "roughly 1/20th of the image, DO NOT attempt identification\n\n"
-            "If the face is too small, too distant, or too blurry to see clear facial features, "
-            "respond with 'Face too distant' or 'Face not clear enough' - do NOT guess.\n\n"
-            "MATCHING GUIDELINES (only if face is clear enough):\n"
-            "1. Compare facial features between reference photos and the camera image:\n"
-            "   - Face shape, eye shape/spacing, nose shape, mouth/lips\n"
-            "   - Jawline, eyebrows, skin tone\n"
-            "2. Hair and clothing can help confirm identity but shouldn't be the only factor\n"
-            "3. Account for differences in lighting, angle, and expression\n"
-            "4. Base confidence ONLY on facial feature comparison, not body shape or clothing\n\n"
-            "CONFIDENCE GUIDELINES:\n"
-            "- 80%+ confidence: Face is clearly visible AND features strongly match\n"
-            "- 60-79% confidence: Face is visible AND features mostly match\n"
-            "- Below 60%: Only if you can see the face but aren't certain of the match\n"
-            "- NEVER give high confidence for distant or unclear faces\n\n"
-            "RESPONSE FORMAT:\n"
-            "- If face is clear enough: 'PersonName XX%' with your confidence estimate\n"
-            "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
-            "- If face is too distant/small/blurry: 'Face too distant' or 'Face not clear enough'\n"
-            "- If no human face visible: 'No known faces'\n\n"
-            "Only respond with the identification result, nothing else."
+            "Facial recognition: Compare reference photos to camera image.\n\n"
+            "RULES:\n"
+            "- Only identify faces clearly visible (eyes/nose visible, not distant/tiny)\n"
+            "- If face <1/20th of frame or blurry: respond 'Face too distant'\n"
+            "- Match by facial features (face shape, eyes, nose, jawline), not clothing\n\n"
+            "CONFIDENCE: 80%+=strong match, 60-79%=likely match, <60%=uncertain\n\n"
+            "RESPOND WITH ONLY: 'PersonName XX%' or 'Face too distant' or 'No known faces'"
         )
 
         # Build the user prompt describing the reference photos
@@ -1747,39 +1727,16 @@ class VideoAnalyzer:
         # Build prompt parts with reference photos
         people_names = list(reference_photos.keys())
 
-        # System prompt for video-based facial recognition - balanced for accuracy
+        # System prompt for video-based facial recognition - token optimized
         system_prompt = (
-            "You are a facial recognition assistant. You will be shown reference photos of known people, "
-            "followed by a VIDEO from a security camera. Your task is to identify if a person visible "
-            "in the video matches someone from the reference photos.\n\n"
-            "FACE QUALITY REQUIREMENTS - CRITICAL:\n"
-            "You can ONLY attempt identification if the face meets ALL of these criteria:\n"
-            "1. The face must be CLOSE ENOUGH to see clear facial features (not a distant figure)\n"
-            "2. You must be able to clearly see at least the eyes and nose in at least one frame\n"
-            "3. The face should take up a reasonable portion of the frame (not a tiny dot)\n"
-            "4. If someone is across the street, far in the background, or their face is smaller than "
-            "roughly 1/20th of the frame, DO NOT attempt identification\n\n"
-            "If the face is too small, too distant, or too blurry to see clear facial features, "
-            "respond with 'Face too distant' or 'Face not clear enough' - do NOT guess.\n\n"
-            "MATCHING GUIDELINES (only if face is clear enough):\n"
-            "1. Examine the video for clear facial views - use multiple frames for better accuracy\n"
-            "2. Compare facial features between reference photos and people in the video:\n"
-            "   - Face shape, eye shape/spacing, nose shape, mouth/lips\n"
-            "   - Jawline, eyebrows, skin tone\n"
-            "3. Hair, clothing, and body type can help confirm identity but shouldn't be the only factor\n"
-            "4. Account for differences in lighting, angle, expression, and motion blur\n"
-            "5. Base confidence ONLY on facial feature comparison, not body shape or clothing\n\n"
-            "CONFIDENCE GUIDELINES:\n"
-            "- 80%+ confidence: Face is clearly visible in multiple frames AND features strongly match\n"
-            "- 60-79% confidence: Face is visible AND features mostly match\n"
-            "- Below 60%: Only if you can see the face but aren't certain of the match\n"
-            "- NEVER give high confidence for distant or unclear faces\n\n"
-            "RESPONSE FORMAT:\n"
-            "- If face is clear enough: 'PersonName XX%' with your confidence estimate\n"
-            "- For multiple people: 'PersonName1 XX%, PersonName2 YY%'\n"
-            "- If face is too distant/small/blurry: 'Face too distant' or 'Face not clear enough'\n"
-            "- If no human face visible: 'No known faces'\n\n"
-            "Only respond with the identification result, nothing else."
+            "Facial recognition: Compare reference photos to video frames.\n\n"
+            "RULES:\n"
+            "- Only identify faces clearly visible (eyes/nose visible, not distant/tiny)\n"
+            "- If face <1/20th of frame or blurry: respond 'Face too distant'\n"
+            "- Match by facial features (face shape, eyes, nose, jawline), not clothing\n"
+            "- Use multiple frames for better accuracy\n\n"
+            "CONFIDENCE: 80%+=strong match, 60-79%=likely match, <60%=uncertain\n\n"
+            "RESPOND WITH ONLY: 'PersonName XX%' or 'Face too distant' or 'No known faces'"
         )
 
         # Build the user prompt describing the reference photos
@@ -1812,7 +1769,7 @@ class VideoAnalyzer:
 
         # Use configured resolution (0 = original, no resize)
         res = self.facial_recognition_resolution
-        quality = 90  # High quality for cloud providers
+        quality = self.facial_recognition_quality
 
         # Build parts array with reference photos and camera image
         parts = []
@@ -1866,7 +1823,7 @@ class VideoAnalyzer:
 
         # Use configured resolution (0 = original, no resize)
         res = self.facial_recognition_resolution
-        quality = 90  # High quality for cloud providers
+        quality = self.facial_recognition_quality
 
         # Build parts array with reference photos and VIDEO
         parts = []
@@ -1917,7 +1874,7 @@ class VideoAnalyzer:
         """Identify faces using OpenRouter."""
         # Use configured resolution (0 = original, no resize)
         res = self.facial_recognition_resolution
-        quality = 90  # High quality for cloud providers
+        quality = self.facial_recognition_quality
 
         # Build content array with reference photos and camera image
         content = []
@@ -1964,7 +1921,7 @@ class VideoAnalyzer:
         """Identify faces in VIDEO using OpenRouter."""
         # Use configured resolution (0 = original, no resize)
         res = self.facial_recognition_resolution
-        quality = 90  # High quality for cloud providers
+        quality = self.facial_recognition_quality
 
         # Build content array with reference photos and VIDEO
         content = []
@@ -2011,7 +1968,7 @@ class VideoAnalyzer:
         """Identify faces in VIDEO using local vLLM endpoint."""
         # Use configured resolution (0 = original, no resize) - full quality for local
         res = self.facial_recognition_resolution
-        quality = 90  # High quality matching cloud providers
+        quality = self.facial_recognition_quality
 
         # Build content array with reference photos and VIDEO
         content = []
@@ -2089,7 +2046,7 @@ class VideoAnalyzer:
         """Identify faces using local vLLM endpoint."""
         # Use configured resolution (0 = original, no resize) - full quality for local
         res = self.facial_recognition_resolution
-        quality = 90  # High quality matching cloud providers
+        quality = self.facial_recognition_quality
 
         # Build content array with reference photos and camera image
         content = []

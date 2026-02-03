@@ -61,10 +61,12 @@ from .const import (
     CONF_FACIAL_RECOGNITION_ENABLED,
     CONF_FACIAL_RECOGNITION_DIRECTORY,
     CONF_FACIAL_RECOGNITION_RESOLUTION,
+    CONF_FACIAL_RECOGNITION_QUALITY,
     CONF_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     DEFAULT_FACIAL_RECOGNITION_ENABLED,
     DEFAULT_FACIAL_RECOGNITION_DIRECTORY,
     DEFAULT_FACIAL_RECOGNITION_RESOLUTION,
+    DEFAULT_FACIAL_RECOGNITION_QUALITY,
     DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD,
     # Timeline
     CONF_TIMELINE_ENABLED,
@@ -911,11 +913,21 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                         options=[
                             {"label": "Original (no resize - sharpest)", "value": "0"},
                             {"label": "1024px (high quality)", "value": "1024"},
-                            {"label": "768px (recommended)", "value": "768"},
-                            {"label": "512px (faster, more people)", "value": "512"},
-                            {"label": "384px (local vLLM optimized)", "value": "384"},
+                            {"label": "768px (high quality)", "value": "768"},
+                            {"label": "512px (balanced)", "value": "512"},
+                            {"label": "384px (recommended - token optimized)", "value": "384"},
                         ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(
+                    CONF_FACIAL_RECOGNITION_QUALITY,
+                    default=current.get(CONF_FACIAL_RECOGNITION_QUALITY, DEFAULT_FACIAL_RECOGNITION_QUALITY)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=50, max=95, step=5,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.SLIDER
                     )
                 ),
                 vol.Required(
