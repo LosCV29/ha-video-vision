@@ -1194,12 +1194,12 @@ class VideoAnalyzer:
         else:
             prompt = (
                 "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. "
-                "Report ANY people, animals, or pets visible - even if small, distant, partially obscured, or at the edges. "
-                "Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. "
-                "IMPORTANT: When multiple vehicles are present, distinguish them by COLOR first (e.g., 'blue SUV' vs 'silver SUV'). "
-                "Be precise about which specific vehicle a person is interacting with - identify it by its color and position in frame. "
-                "For animals, identify the type (dog, cat, etc.) and what they are doing. "
-                "Be concise (2-3 sentences)."
+                "CRITICAL: You MUST report ANY person visible - even if they are small, distant, in the background, "
+                "on a sidewalk, partially obscured, or at the edges. A distant figure on a sidewalk IS activity. "
+                "Also report animals/pets and moving vehicles. For people, describe their location and what they are doing. "
+                "When multiple vehicles are present, distinguish them by COLOR (e.g., 'blue SUV' vs 'silver SUV'). "
+                "For animals, identify the type and what they are doing. "
+                "Be concise but NEVER omit people - mentioning all visible people takes priority over brevity."
             )
 
         # Send video to AI provider for analysis
@@ -1260,14 +1260,14 @@ class VideoAnalyzer:
         else:
             # Default prompt - modeled after LLM Vision's effective approach
             return (
-                "Analyze the image and give a concise, objective event summary. "
-                "Focus on people, pets, and vehicles - scan the ENTIRE frame including background, "
-                "edges, and distant areas. Report ANY people visible no matter how small. "
-                "Track movement and activity. Describe physical characteristics only - "
-                "never assume identities. Be accurate and factual. "
-                "When describing positions, be PRECISE about spatial relationships - "
-                "identify objects by their COLOR and position in frame (left/right/center). "
-                "If someone is near a vehicle, clearly identify WHICH vehicle by its distinct color."
+                "Analyze the video and give a concise, objective event summary. "
+                "CRITICAL RULE: You MUST mention ANY person visible in the frame - this includes people "
+                "who are distant, in the background, on sidewalks, or only partially visible. "
+                "A person walking far away IS activity that must be reported. "
+                "Scan the ENTIRE frame including background, edges, and distant areas. "
+                "Also report pets and vehicles. Describe physical characteristics only - never assume identities. "
+                "When describing positions, identify objects by their COLOR and position (left/right/center). "
+                "Never omit a visible person just because they are far away or not the main focus."
             )
 
     # Shared error message for cloud cameras without video streams
