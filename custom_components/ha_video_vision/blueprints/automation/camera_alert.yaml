@@ -49,7 +49,15 @@ blueprint:
 
     custom_prompt:
       name: "Custom Prompt (Optional)"
-      description: "Override the AI prompt. Leave empty for default factual description."
+      description: "Override the AI user prompt. Leave empty for default factual description."
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    custom_system_prompt:
+      name: "Custom System Prompt (Optional)"
+      description: "Override the system prompt that controls LLM behavior and response style. This takes priority over the built-in system prompt. Camera context is still appended automatically. Leave empty for default."
       default: ""
       selector:
         text:
@@ -134,6 +142,7 @@ variables:
   tap_nav: !input tap_navigate
   camera_input: !input camera_name
   user_prompt: !input custom_prompt
+  user_system_prompt: !input custom_system_prompt
   custom_title: !input notification_title
   time_start: !input notify_start
   time_end: !input notify_end
@@ -143,6 +152,8 @@ variables:
   timeline_enabled: !input save_to_timeline
   # Default prompt - reports ALL people/vehicles whether moving or stationary
   default_prompt: "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. Report ANY people visible - even if small, distant, partially obscured, or at the edges of frame. Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. Ignore parked cars and static structures. Be concise (2-3 sentences)."
+  # Default system prompt - enforces concise notification-friendly responses
+  default_system_prompt: "You are a home security camera assistant. Be concise - respond in 2-3 sentences max. Report people, animals, and moving vehicles. Ignore static objects and scenery. If nothing notable is happening, say 'No activity observed.' Do not describe the scene or setting."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}
@@ -181,6 +192,7 @@ action:
       camera: !input camera_name
       # Duration omitted - uses integration's configured video_duration for consistent recording length
       user_query: "{{ user_prompt if user_prompt else default_prompt }}"
+      system_prompt: "{{ user_system_prompt if user_system_prompt else default_system_prompt }}"
       facial_recognition: "{{ face_rec_enabled }}"
       remember: "{{ timeline_enabled }}"
       frame_position: "{{ frame_pos }}"

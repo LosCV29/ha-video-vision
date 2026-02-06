@@ -61,6 +61,14 @@ analyze_camera:
           min: 50
           max: 1000
           step: 50
+    system_prompt:
+      name: System Prompt
+      description: Override the system prompt that controls LLM behavior and response style. Leave empty for the built-in default. Camera context is still appended automatically.
+      required: false
+      default: ""
+      selector:
+        text:
+          multiline: true
 
 record_clip:
   name: Record Clip
