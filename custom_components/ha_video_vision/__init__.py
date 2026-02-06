@@ -92,6 +92,7 @@ from .const import (
     ATTR_REMEMBER,
     ATTR_FRAME_POSITION,
     ATTR_MAX_TOKENS,
+    ATTR_SYSTEM_PROMPT,
     # Detection Keywords
     PERSON_KEYWORDS,
     ANIMAL_KEYWORDS,
@@ -176,6 +177,8 @@ SERVICE_ANALYZE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_FRAME_POSITION): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
         # Override max tokens for this analysis (useful for verbose responses)
         vol.Optional(ATTR_MAX_TOKENS): vol.All(vol.Coerce(int), vol.Range(min=50, max=1000)),
+        # Override the system prompt (controls LLM behavior/style)
+        vol.Optional(ATTR_SYSTEM_PROMPT, default=""): cv.string,
     }
 )
 
@@ -253,9 +256,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frame_position = call.data.get(ATTR_FRAME_POSITION)
         # Override max tokens for this analysis (None = use config default)
         max_tokens = call.data.get(ATTR_MAX_TOKENS)
+        # Override system prompt (controls LLM behavior/style)
+        system_prompt = call.data.get(ATTR_SYSTEM_PROMPT, "")
 
         result = await analyzer.analyze_camera(
-            camera, duration, user_query, frame_position, max_tokens
+            camera, duration, user_query, frame_position, max_tokens, system_prompt
         )
 
         # Run LLM-based facial recognition on the ENTIRE VIDEO if enabled
@@ -1135,7 +1140,8 @@ class VideoAnalyzer:
 
     async def analyze_camera(
         self, camera_input: str, duration: int = None, user_query: str = "",
-        frame_position: int | None = None, max_tokens: int | None = None
+        frame_position: int | None = None, max_tokens: int | None = None,
+        system_prompt: str = ""
     ) -> dict[str, Any]:
         """Analyze camera using VIDEO and AI vision.
 
@@ -1148,6 +1154,8 @@ class VideoAnalyzer:
                           None = use configured default.
             max_tokens: Override max tokens for this analysis.
                        None = use configured default.
+            system_prompt: Override the system prompt sent to the LLM.
+                          Empty string = use built-in default.
         """
         duration = duration if duration is not None else self.video_duration
 
@@ -1208,7 +1216,7 @@ class VideoAnalyzer:
         # Send video to AI provider for analysis
         # The AI analyzes the entire video - no separate snapshot needed
         description, provider_used = await self._analyze_with_provider(
-            video_bytes, frame_bytes, prompt, entity_id, max_tokens
+            video_bytes, frame_bytes, prompt, entity_id, max_tokens, system_prompt
         )
 
         _LOGGER.debug("Analysis complete for %s", friendly_name)
@@ -1320,7 +1328,8 @@ class VideoAnalyzer:
 
     async def _analyze_with_provider(
         self, video_bytes: bytes | None, frame_bytes: bytes | None, prompt: str,
-        entity_id: str = "", max_tokens: int | None = None
+        entity_id: str = "", max_tokens: int | None = None,
+        system_prompt_override: str = ""
     ) -> tuple[str, str]:
         """Send video/image to the configured AI provider.
 
@@ -1330,11 +1339,24 @@ class VideoAnalyzer:
             prompt: Analysis prompt
             entity_id: Camera entity ID for context
             max_tokens: Override max tokens (None = use configured default)
+            system_prompt_override: Override system prompt (empty = use built-in default)
 
         Returns: (description, provider_used)
         """
         effective_provider, effective_model, effective_api_key = self._get_effective_provider()
-        system_prompt = self._build_system_prompt(entity_id)
+        # Use caller's system prompt if provided, otherwise build the default
+        if system_prompt_override:
+            # Still append camera context if available so the LLM knows the scene
+            camera_context = self.camera_contexts.get(entity_id, "")
+            if camera_context:
+                system_prompt = (
+                    f"{system_prompt_override}\n\n"
+                    f"CAMERA CONTEXT:\n{camera_context}"
+                )
+            else:
+                system_prompt = system_prompt_override
+        else:
+            system_prompt = self._build_system_prompt(entity_id)
         # Use override if provided, otherwise use configured default
         tokens = max_tokens if max_tokens is not None else self.vllm_max_tokens
 

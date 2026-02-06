@@ -143,6 +143,7 @@ ATTR_FACIAL_RECOGNITION: Final = "facial_recognition"
 ATTR_REMEMBER: Final = "remember"
 ATTR_FRAME_POSITION: Final = "frame_position"
 ATTR_MAX_TOKENS: Final = "max_tokens"
+ATTR_SYSTEM_PROMPT: Final = "system_prompt"
 
 # =============================================================================
 # DETECTION KEYWORDS (for AI response parsing)
