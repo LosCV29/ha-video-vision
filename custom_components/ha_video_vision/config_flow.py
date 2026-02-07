@@ -942,7 +942,7 @@ class VideoVisionOptionsFlow(config_entries.OptionsFlow):
                 ),
             }),
             description_placeholders={
-                "threshold_hint": "60% recommended. Lower if missing people, raise to 70%+ if getting false positives.",
+                "threshold_hint": "80% recommended (strong match). Lower to 70% if missing people, raise to 85%+ if getting false positives.",
             },
         )
 

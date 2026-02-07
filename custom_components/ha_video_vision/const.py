@@ -115,7 +115,8 @@ DEFAULT_FACIAL_RECOGNITION_RESOLUTION: Final = 384  # Optimized for local vLLM t
 DEFAULT_FACIAL_RECOGNITION_QUALITY: Final = 75  # Good balance of quality and token usage
 # Minimum confidence threshold for facial recognition matches (0-100)
 # LLM reports all confidence levels, threshold controls what gets shown to user
-DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD: Final = 60
+# 80% requires a "strong match" - reduces false positives from obscured/distant faces
+DEFAULT_FACIAL_RECOGNITION_CONFIDENCE_THRESHOLD: Final = 80
 
 # =============================================================================
 # TIMELINE (Calendar-based event history)
