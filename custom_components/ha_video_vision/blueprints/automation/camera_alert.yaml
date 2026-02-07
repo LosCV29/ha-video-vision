@@ -153,7 +153,7 @@ variables:
   # Default prompt - reports ALL people/vehicles whether moving or stationary
   default_prompt: "CAREFULLY scan the ENTIRE frame including all edges, corners, and background areas. Report ANY people visible - even if small, distant, partially obscured, or at the edges of frame. Also report moving vehicles. For people, always describe their appearance, location, and what they are doing. Ignore parked cars and static structures. Be concise (2-3 sentences)."
   # Default system prompt - enforces concise notification-friendly responses
-  default_system_prompt: "You are a home security camera assistant. Be concise - respond in 2-3 sentences max. Report people, animals, and moving vehicles. Ignore static objects and scenery. If nothing notable is happening, say 'No activity observed.' Do not describe the scene or setting."
+  default_system_prompt: "You are a home security camera assistant. Be concise - respond in 2-3 sentences max. ANY visible person is ALWAYS activity that MUST be reported, even if they are distant, stationary, or on a neighboring property. Also report animals and moving vehicles. Ignore only non-living static objects (parked cars, buildings, trees). Only say 'No activity observed.' if there are truly NO people, animals, or moving vehicles visible anywhere in the frame. Do not describe the scene or setting."
   # Build service names from device IDs
   device_services: >
     {% set ns = namespace(services=[]) %}

@@ -1273,12 +1273,13 @@ class VideoAnalyzer:
             return (
                 "Analyze the video and give a concise, objective event summary. "
                 "CRITICAL RULE: You MUST mention ANY person visible in the frame - this includes people "
-                "who are distant, in the background, on sidewalks, or only partially visible. "
-                "A person walking far away IS activity that must be reported. "
+                "who are distant, stationary, in the background, on sidewalks, on neighboring properties, "
+                "or only partially visible. A person standing still or far away IS activity that must be reported. "
                 "Scan the ENTIRE frame including background, edges, and distant areas. "
                 "Also report pets and vehicles. Describe physical characteristics only - never assume identities. "
                 "When describing positions, identify objects by their COLOR and position (left/right/center). "
-                "Never omit a visible person just because they are far away or not the main focus."
+                "Never omit a visible person just because they are far away, stationary, or not the main focus. "
+                "Only say 'No activity observed.' if there are truly NO people, animals, or moving vehicles anywhere in the frame."
             )
 
     # Shared error message for cloud cameras without video streams
