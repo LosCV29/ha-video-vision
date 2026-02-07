@@ -1208,7 +1208,10 @@ class VideoAnalyzer:
                 "CRITICAL: You MUST report ANY person visible - even if they are small, distant, in the background, "
                 "on a sidewalk, partially obscured, or at the edges. A distant figure on a sidewalk IS activity. "
                 "Also report animals/pets and moving vehicles. For people, describe their location and what they are doing. "
-                "When multiple vehicles are present, distinguish them by COLOR (e.g., 'blue SUV' vs 'silver SUV'). "
+                "IMPORTANT: If a person is wearing a uniform or carrying packages, identify them by role "
+                "(e.g., 'delivery driver', 'postal worker', 'utility worker'). Note any branded vehicles "
+                "(e.g., 'FedEx truck', 'Amazon van', 'UPS truck') and packages being carried or left at the door. "
+                "When multiple vehicles are present, distinguish them by COLOR and BRAND when visible. "
                 "For animals, identify the type and what they are doing. "
                 "Be concise but NEVER omit people - mentioning all visible people takes priority over brevity."
             )
@@ -1278,6 +1281,9 @@ class VideoAnalyzer:
                 "Scan the ENTIRE frame including background, edges, and distant areas. "
                 "Also report pets and vehicles. Describe physical characteristics only - never assume identities. "
                 "When describing positions, identify objects by their COLOR and position (left/right/center). "
+                "If a person is wearing a recognizable uniform or company branding, describe their role "
+                "(e.g., 'delivery driver', 'postal worker'). Note branded delivery vehicles (FedEx, UPS, Amazon, USPS) "
+                "and any packages being carried or left at the door. "
                 "Never omit a visible person just because they are far away, stationary, or not the main focus. "
                 "Only say 'No activity observed.' if there are truly NO people, animals, or moving vehicles anywhere in the frame."
             )
@@ -1712,9 +1718,13 @@ class VideoAnalyzer:
             "RULES:\n"
             "- Only identify faces clearly visible (eyes/nose visible, not distant/tiny)\n"
             "- If face <1/20th of frame or blurry: respond 'Face too distant'\n"
-            "- Match by facial features (face shape, eyes, nose, jawline), not clothing\n\n"
-            "CONFIDENCE: 80%+=strong match, 60-79%=likely match, <60%=uncertain\n\n"
-            "RESPOND WITH ONLY: 'PersonName XX%' or 'Face too distant' or 'No known faces'"
+            "- Match by facial features (face shape, eyes, nose, jawline), NOT clothing/hair/body type\n"
+            "- If face is obscured by hat, sunglasses, helmet, or mask: lower confidence significantly\n"
+            "- If person is facing away or in profile with key features hidden: respond 'Face not clear enough'\n"
+            "- A wrong identification is WORSE than a missed one - when in doubt, say 'No known faces'\n"
+            "- People in uniforms (delivery, postal, utility) are almost certainly NOT household members\n\n"
+            "CONFIDENCE: 90%+=very strong match, 80-89%=strong match, 70-79%=possible match, <70%=uncertain\n\n"
+            "RESPOND WITH ONLY: 'PersonName XX%' or 'Face too distant' or 'Face not clear enough' or 'No known faces'"
         )
 
         # Build the user prompt describing the reference photos
@@ -1756,10 +1766,14 @@ class VideoAnalyzer:
             "RULES:\n"
             "- Only identify faces clearly visible (eyes/nose visible, not distant/tiny)\n"
             "- If face <1/20th of frame or blurry: respond 'Face too distant'\n"
-            "- Match by facial features (face shape, eyes, nose, jawline), not clothing\n"
+            "- Match by facial features (face shape, eyes, nose, jawline), NOT clothing/hair/body type\n"
+            "- If face is obscured by hat, sunglasses, helmet, or mask: lower confidence significantly\n"
+            "- If person is facing away or in profile with key features hidden: respond 'Face not clear enough'\n"
+            "- A wrong identification is WORSE than a missed one - when in doubt, say 'No known faces'\n"
+            "- People in uniforms (delivery, postal, utility) are almost certainly NOT household members\n"
             "- Use multiple frames for better accuracy\n\n"
-            "CONFIDENCE: 80%+=strong match, 60-79%=likely match, <60%=uncertain\n\n"
-            "RESPOND WITH ONLY: 'PersonName XX%' or 'Face too distant' or 'No known faces'"
+            "CONFIDENCE: 90%+=very strong match, 80-89%=strong match, 70-79%=possible match, <70%=uncertain\n\n"
+            "RESPOND WITH ONLY: 'PersonName XX%' or 'Face too distant' or 'Face not clear enough' or 'No known faces'"
         )
 
         # Build the user prompt describing the reference photos
