@@ -845,6 +845,7 @@ class VideoAnalyzer:
         # ultrafast + zerolatency is nearly as fast as copy but more reliable
         # video_width=0 means native resolution (no scaling)
         vf_filters = []
+        target_fps = None
         if self.video_fps_percent < 100:
             target_fps = max(8, int(30 * self.video_fps_percent / 100))
             vf_filters.append(f"fps={target_fps}")
@@ -860,6 +861,12 @@ class VideoAnalyzer:
             "-tune", "zerolatency",
             "-crf", self._get_video_crf(),  # Use quality setting instead of hardcoded 28
         ])
+
+        # FPS limiting: the fps video filter alone can fail on RTSP/live streams with
+        # unreliable timestamps. The -r output option enforces framerate at the muxer
+        # level based on frame count, which works regardless of input timestamp quality.
+        if target_fps is not None:
+            cmd.extend(["-r", str(target_fps)])
 
         cmd.extend(["-an", output_path])
 
@@ -924,9 +931,10 @@ class VideoAnalyzer:
 
             # Log settings being applied
             res_str = "native" if self.video_width == 0 else str(self.video_width)
+            fps_str = f"{max(8, int(30 * self.video_fps_percent / 100))}fps" if self.video_fps_percent < 100 else "native"
             _LOGGER.info(
-                "Recording clip %s: duration=%ds, resolution=%s, quality=CRF%s",
-                entity_id, duration, res_str, self._get_video_crf()
+                "Recording clip %s: duration=%ds, resolution=%s, quality=CRF%s, fps=%s (%d%%)",
+                entity_id, duration, res_str, self._get_video_crf(), fps_str, self.video_fps_percent
             )
 
             proc = await asyncio.create_subprocess_exec(
@@ -1015,9 +1023,10 @@ class VideoAnalyzer:
 
             # Log settings being applied (helps verify config is respected)
             res_str = "native" if self.video_width == 0 else str(self.video_width)
+            fps_str = f"{max(8, int(30 * self.video_fps_percent / 100))}fps" if self.video_fps_percent < 100 else "native"
             _LOGGER.info(
-                "Recording %s: duration=%ds, resolution=%s, quality=CRF%s, fps=%d%%",
-                entity_id, duration, res_str, self._get_video_crf(), self.video_fps_percent
+                "Recording %s: duration=%ds, resolution=%s, quality=CRF%s, fps=%s (%d%%)",
+                entity_id, duration, res_str, self._get_video_crf(), fps_str, self.video_fps_percent
             )
 
             # Log the FFmpeg command (mask credentials in URL)
